@@ -1,0 +1,3 @@
+confluent-kafka[avro]==2.8.2
+fastavro==1.10.0
+faker==33.3.1
