@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  static-checks:
+    name: Python and dbt static checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: dbt_lakehouse/requirements.txt
+
+      - name: Install dbt dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r dbt_lakehouse/requirements.txt
+
+      - name: Compile Python files
+        run: |
+          python -m py_compile \
+            simulator/main_generator.py \
+            storage/iceberg_init.py \
+            storage/iceberg_maintenance.py \
+            streaming/jobs/kafka_to_iceberg.py
+
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -p "test_*.py"
+
+      - name: Parse dbt project
+        working-directory: dbt_lakehouse
+        run: dbt parse --profiles-dir .
+
+  lakehouse-smoke:
+    name: Manual lakehouse smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    if: github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Run dbt against local Trino/Iceberg stack
+        run: docker compose -f docker/docker-compose.yml --profile dbt run --rm dbt-runner
+
+      - name: Stop local stack
+        if: always()
+        run: docker compose -f docker/docker-compose.yml --profile dbt down -v

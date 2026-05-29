@@ -1,10 +1,12 @@
-"""Kafka Avro transactions to clean stream output.
+"""Kafka transactions into Iceberg Bronze/Silver.
 
 The job consumes the Confluent-wire-format Avro stream produced by the
-transaction simulator, decodes values through Schema Registry, deduplicates
-transactions per event-time window, masks PII, and writes the clean stream to a
-Flink print sink. The print sink is intentionally temporary until the Iceberg
-sink is wired in the next phase.
+transaction simulator, decodes values through Schema Registry, and writes an
+open lakehouse medallion layout on Iceberg:
+
+* ``iceberg.bronze.transactions`` receives append-only raw decoded events.
+* ``iceberg.silver.transactions`` receives event-time-window deduplicated and
+  masked events partitioned by event time for efficient Trino/dbt reads.
 """
 
 from __future__ import annotations
@@ -13,11 +15,12 @@ import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from pyflink.common import Configuration
-from pyflink.datastream import StreamExecutionEnvironment
-from pyflink.datastream.checkpointing_mode import CheckpointingMode
-from pyflink.table import EnvironmentSettings, StreamTableEnvironment
+if TYPE_CHECKING:
+    from pyflink.common import Configuration
+    from pyflink.datastream import StreamExecutionEnvironment
+    from pyflink.table import StreamTableEnvironment
 
 
 LOGGER = logging.getLogger("fintech.kafka-to-iceberg")
@@ -31,8 +34,15 @@ class JobConfig:
     schema_registry_url: str = "http://localhost:8081"
     source_topic: str = "financial.transactions"
     schema_registry_subject: str = "financial.transactions-value"
-    consumer_group_id: str = "flink-kafka-to-iceberg-phase3"
+    consumer_group_id: str = "flink-kafka-to-iceberg-phase4"
     startup_mode: str = "earliest-offset"
+    iceberg_catalog_name: str = "iceberg"
+    iceberg_rest_uri: str = "http://localhost:8181"
+    iceberg_warehouse: str = "s3://warehouse/"
+    s3_endpoint: str = "http://localhost:9000"
+    s3_access_key_id: str = "admin"
+    s3_secret_access_key: str = "password"
+    s3_region: str = "us-east-1"
     dedup_window_minutes: int = 10
     watermark_lateness_seconds: int = 20
     checkpoint_interval_ms: int = 30_000
@@ -41,8 +51,6 @@ class JobConfig:
     checkpoint_dir: str = "file:///tmp/flink/checkpoints/kafka-to-iceberg"
     rocksdb_local_dir: str = "/tmp/flink/rocksdb/kafka-to-iceberg"
     parallelism: int = 2
-    sink_parallelism: int = 1
-    print_identifier: str = "clean_transactions"
     pipeline_jars: str | None = None
     table_state_ttl: str = "12 min"
     log_level: str = "INFO"
@@ -62,6 +70,7 @@ class JobConfig:
         default_state_ttl_minutes = dedup_window_minutes + (
             watermark_lateness_seconds // 60
         ) + 2
+
         return cls(
             kafka_bootstrap_servers=os.getenv(
                 "KAFKA_BOOTSTRAP_SERVERS", cls.kafka_bootstrap_servers
@@ -75,6 +84,20 @@ class JobConfig:
             ),
             consumer_group_id=os.getenv("FLINK_CONSUMER_GROUP_ID", cls.consumer_group_id),
             startup_mode=os.getenv("FLINK_STARTUP_MODE", cls.startup_mode),
+            iceberg_catalog_name=os.getenv(
+                "ICEBERG_CATALOG_NAME", cls.iceberg_catalog_name
+            ),
+            iceberg_rest_uri=os.getenv("ICEBERG_REST_URI", cls.iceberg_rest_uri),
+            iceberg_warehouse=os.getenv("ICEBERG_WAREHOUSE", cls.iceberg_warehouse),
+            s3_endpoint=os.getenv(
+                "S3_ENDPOINT",
+                os.getenv("MINIO_ENDPOINT", cls.s3_endpoint),
+            ),
+            s3_access_key_id=os.getenv("AWS_ACCESS_KEY_ID", cls.s3_access_key_id),
+            s3_secret_access_key=os.getenv(
+                "AWS_SECRET_ACCESS_KEY", cls.s3_secret_access_key
+            ),
+            s3_region=os.getenv("AWS_REGION", cls.s3_region),
             dedup_window_minutes=dedup_window_minutes,
             watermark_lateness_seconds=watermark_lateness_seconds,
             checkpoint_interval_ms=max(
@@ -89,8 +112,6 @@ class JobConfig:
             checkpoint_dir=os.getenv("FLINK_CHECKPOINT_DIR", cls.checkpoint_dir),
             rocksdb_local_dir=os.getenv("FLINK_ROCKSDB_LOCAL_DIR", cls.rocksdb_local_dir),
             parallelism=max(1, _int_env("FLINK_PARALLELISM", cls.parallelism)),
-            sink_parallelism=max(1, _int_env("FLINK_SINK_PARALLELISM", cls.sink_parallelism)),
-            print_identifier=os.getenv("FLINK_PRINT_IDENTIFIER", cls.print_identifier),
             pipeline_jars=_normalize_pipeline_jars(
                 os.getenv("FLINK_PIPELINE_JARS")
                 or os.getenv("PYFLINK_PIPELINE_JARS")
@@ -110,26 +131,37 @@ def main() -> None:
     configure_logging(config.log_level)
 
     LOGGER.info(
-        "Starting PyFlink job topic=%s kafka=%s schema_registry=%s group_id=%s "
-        "window_minutes=%s watermark_lateness_seconds=%s parallelism=%s",
+        "Starting PyFlink Iceberg job topic=%s kafka=%s schema_registry=%s "
+        "iceberg_rest=%s warehouse=%s s3_endpoint=%s group_id=%s",
         config.source_topic,
         config.kafka_bootstrap_servers,
         config.schema_registry_url,
+        config.iceberg_rest_uri,
+        config.iceberg_warehouse,
+        config.s3_endpoint,
         config.consumer_group_id,
-        config.dedup_window_minutes,
-        config.watermark_lateness_seconds,
-        config.parallelism,
     )
 
-    env, table_env = build_environments(config)
-    register_tables(table_env, config)
-    submit_insert(table_env, config)
+    _, table_env = build_environments(config)
+    register_kafka_source(table_env, config)
+    register_iceberg_catalog_and_tables(table_env, config)
+    submit_medallion_inserts(table_env, config)
 
 
 def build_environments(
     config: JobConfig,
-) -> tuple[StreamExecutionEnvironment, StreamTableEnvironment]:
+) -> tuple["StreamExecutionEnvironment", "StreamTableEnvironment"]:
     """Create the Flink streaming and table environments."""
+
+    try:
+        from pyflink.datastream import StreamExecutionEnvironment
+        from pyflink.datastream.checkpointing_mode import CheckpointingMode
+        from pyflink.table import EnvironmentSettings, StreamTableEnvironment
+    except ImportError as exc:
+        raise RuntimeError(
+            "PyFlink is required to run the streaming job. Install apache-flink "
+            "or submit this file with a Flink Python runtime."
+        ) from exc
 
     flink_config = build_flink_configuration(config)
     env = StreamExecutionEnvironment.get_execution_environment(flink_config)
@@ -152,6 +184,9 @@ def build_environments(
     )
     table_env = StreamTableEnvironment.create(env, environment_settings=settings)
     table_env.get_config().set("table.exec.state.ttl", config.table_state_ttl)
+    table_env.get_config().set("table.local-time-zone", "UTC")
+    table_env.get_config().set("table.optimizer.reuse-source-enabled", "true")
+    table_env.get_config().set("table.optimizer.reuse-sub-plan-enabled", "true")
 
     LOGGER.info(
         "Configured RocksDB state backend checkpoint_dir=%s rocksdb_local_dir=%s "
@@ -164,8 +199,15 @@ def build_environments(
     return env, table_env
 
 
-def build_flink_configuration(config: JobConfig) -> Configuration:
+def build_flink_configuration(config: JobConfig) -> "Configuration":
     """Return production-oriented Flink configuration for local submission."""
+
+    try:
+        from pyflink.common import Configuration
+    except ImportError as exc:
+        raise RuntimeError(
+            "PyFlink is required to build the Flink runtime configuration."
+        ) from exc
 
     flink_config = Configuration()
     flink_config.set_string("parallelism.default", str(config.parallelism))
@@ -185,6 +227,11 @@ def build_flink_configuration(config: JobConfig) -> Configuration:
     flink_config.set_string("state.backend.rocksdb.localdir", config.rocksdb_local_dir)
     flink_config.set_string("state.checkpoints.dir", config.checkpoint_dir)
     flink_config.set_string("table.local-time-zone", "UTC")
+    flink_config.set_string("s3.endpoint", config.s3_endpoint)
+    flink_config.set_string("s3.path.style.access", "true")
+    flink_config.set_string("s3.region", config.s3_region)
+    flink_config.set_string("s3.access-key", config.s3_access_key_id)
+    flink_config.set_string("s3.secret-key", config.s3_secret_access_key)
 
     if config.pipeline_jars:
         flink_config.set_string("pipeline.jars", config.pipeline_jars)
@@ -193,8 +240,11 @@ def build_flink_configuration(config: JobConfig) -> Configuration:
     return flink_config
 
 
-def register_tables(table_env: StreamTableEnvironment, config: JobConfig) -> None:
-    """Register Kafka Avro source, validation view, and print sink."""
+def register_kafka_source(
+    table_env: "StreamTableEnvironment",
+    config: JobConfig,
+) -> None:
+    """Register the Schema Registry backed Kafka source and validity view."""
 
     table_env.execute_sql(
         f"""
@@ -209,7 +259,7 @@ def register_tables(table_env: StreamTableEnvironment, config: JobConfig) -> Non
             location STRING,
             is_flagged_suspicious BOOLEAN,
             event_time AS TO_TIMESTAMP_LTZ(
-                CAST(event_time_epoch_us / 1000 AS BIGINT),
+                CAST(FLOOR(event_time_epoch_us / 1000) AS BIGINT),
                 3
             ),
             WATERMARK FOR event_time AS
@@ -238,53 +288,153 @@ def register_tables(table_env: StreamTableEnvironment, config: JobConfig) -> Non
         """
     )
 
+    LOGGER.info("Registered Schema Registry backed Kafka source")
+
+
+def register_iceberg_catalog_and_tables(
+    table_env: "StreamTableEnvironment",
+    config: JobConfig,
+) -> None:
+    """Register the Iceberg REST catalog and idempotent Bronze/Silver tables."""
+
+    catalog_name = sql_identifier(config.iceberg_catalog_name)
     table_env.execute_sql(
         f"""
-        CREATE TABLE clean_transactions_print (
-            transaction_id STRING,
-            account_id_masked STRING,
-            device_id_masked STRING,
-            amount DOUBLE,
-            currency STRING,
-            event_time_utc STRING,
-            event_time_epoch_us BIGINT,
-            location STRING,
-            is_flagged_suspicious BOOLEAN,
-            dedup_window_start_utc STRING,
-            dedup_window_end_utc STRING
-        ) WITH (
-            'connector' = 'print',
-            'print-identifier' = {sql_literal(config.print_identifier)},
-            'sink.parallelism' = {sql_literal(str(config.sink_parallelism))}
+        CREATE CATALOG {catalog_name} WITH (
+            'type' = 'iceberg',
+            'catalog-impl' = 'org.apache.iceberg.rest.RESTCatalog',
+            'uri' = {sql_literal(config.iceberg_rest_uri)},
+            'warehouse' = {sql_literal(config.iceberg_warehouse)},
+            'io-impl' = 'org.apache.iceberg.aws.s3.S3FileIO',
+            's3.endpoint' = {sql_literal(config.s3_endpoint)},
+            's3.access-key-id' = {sql_literal(config.s3_access_key_id)},
+            's3.secret-access-key' = {sql_literal(config.s3_secret_access_key)},
+            's3.path-style-access' = 'true',
+            's3.region' = {sql_literal(config.s3_region)}
         )
         """
     )
 
-    LOGGER.info("Registered Kafka source, validation view, and print sink")
+    table_env.execute_sql(f"CREATE DATABASE IF NOT EXISTS {catalog_name}.bronze")
+    table_env.execute_sql(f"CREATE DATABASE IF NOT EXISTS {catalog_name}.silver")
+    table_env.execute_sql(f"CREATE DATABASE IF NOT EXISTS {catalog_name}.gold")
+
+    table_env.execute_sql(
+        f"""
+        CREATE TABLE IF NOT EXISTS {catalog_name}.bronze.transactions (
+            transaction_id STRING,
+            account_id STRING,
+            amount DOUBLE,
+            currency STRING,
+            `timestamp` STRING,
+            event_time_epoch_us BIGINT,
+            device_id STRING,
+            location STRING,
+            is_flagged_suspicious BOOLEAN,
+            event_time TIMESTAMP(3),
+            ingest_time TIMESTAMP(3),
+            `year` INT,
+            `month` INT,
+            `day` INT,
+            `hour` INT
+        )
+        PARTITIONED BY (`year`, `month`, `day`, `hour`)
+        WITH (
+            'format-version' = '2',
+            'write.format.default' = 'parquet'
+        )
+        """
+    )
+
+    table_env.execute_sql(
+        f"""
+        CREATE TABLE IF NOT EXISTS {catalog_name}.silver.transactions (
+            transaction_id STRING,
+            account_id STRING,
+            amount DOUBLE,
+            currency STRING,
+            `timestamp` STRING,
+            event_time_epoch_us BIGINT,
+            device_id STRING,
+            location STRING,
+            is_flagged_suspicious BOOLEAN,
+            event_time TIMESTAMP(3),
+            dedup_window_start TIMESTAMP(3),
+            dedup_window_end TIMESTAMP(3),
+            ingest_time TIMESTAMP(3),
+            `year` INT,
+            `month` INT,
+            `day` INT,
+            `hour` INT
+        )
+        PARTITIONED BY (`year`, `month`, `day`, `hour`)
+        WITH (
+            'format-version' = '2',
+            'write.format.default' = 'parquet'
+        )
+        """
+    )
+
+    LOGGER.info("Registered Iceberg catalog and Bronze/Silver tables")
 
 
-def submit_insert(table_env: StreamTableEnvironment, config: JobConfig) -> None:
-    """Run windowed dedupe, PII masking, and print-sink insert."""
+def submit_medallion_inserts(
+    table_env: "StreamTableEnvironment",
+    config: JobConfig,
+) -> None:
+    """Run concurrent Bronze raw append and Silver clean deduplicated writes."""
+
+    catalog_name = sql_identifier(config.iceberg_catalog_name)
+    statement_set = table_env.create_statement_set()
+
+    statement_set.add_insert_sql(
+        f"""
+        INSERT INTO {catalog_name}.bronze.transactions
+        SELECT
+            transaction_id,
+            account_id,
+            amount,
+            currency,
+            `timestamp`,
+            event_time_epoch_us,
+            device_id,
+            location,
+            is_flagged_suspicious,
+            CAST(event_time AS TIMESTAMP(3)) AS event_time,
+            CAST(CURRENT_TIMESTAMP AS TIMESTAMP(3)) AS ingest_time,
+            CAST(EXTRACT(YEAR FROM event_time) AS INT) AS `year`,
+            CAST(EXTRACT(MONTH FROM event_time) AS INT) AS `month`,
+            CAST(EXTRACT(DAY FROM event_time) AS INT) AS `day`,
+            CAST(EXTRACT(HOUR FROM event_time) AS INT) AS `hour`
+        FROM financial_transactions_raw
+        """
+    )
 
     # Flink SQL window deduplication purges per-window state after the watermark
     # closes each window, and RocksDB backs the managed state to avoid heap growth.
-    insert_result = table_env.execute_sql(
+    statement_set.add_insert_sql(
         f"""
-        INSERT INTO clean_transactions_print
+        INSERT INTO {catalog_name}.silver.transactions
         SELECT
             transaction_id,
             CONCAT('ACC-SHA256-', SUBSTRING(SHA2(COALESCE(account_id, ''), 256), 1, 16))
-                AS account_id_masked,
-            CONCAT('DEV-SHA256-', SUBSTRING(SHA2(COALESCE(device_id, ''), 256), 1, 16))
-                AS device_id_masked,
+                AS account_id,
             amount,
             currency,
-            CAST(event_time AS STRING) AS event_time_utc,
+            `timestamp`,
             event_time_epoch_us,
+            CONCAT('DEV-SHA256-', SUBSTRING(SHA2(COALESCE(device_id, ''), 256), 1, 16))
+                AS device_id,
             location,
             is_flagged_suspicious,
-            CAST(window_start AS STRING) AS dedup_window_start_utc,
-            CAST(window_end AS STRING) AS dedup_window_end_utc
+            CAST(event_time AS TIMESTAMP(3)) AS event_time,
+            CAST(window_start AS TIMESTAMP(3)) AS dedup_window_start,
+            CAST(window_end AS TIMESTAMP(3)) AS dedup_window_end,
+            CAST(CURRENT_TIMESTAMP AS TIMESTAMP(3)) AS ingest_time,
+            CAST(EXTRACT(YEAR FROM event_time) AS INT) AS `year`,
+            CAST(EXTRACT(MONTH FROM event_time) AS INT) AS `month`,
+            CAST(EXTRACT(DAY FROM event_time) AS INT) AS `day`,
+            CAST(EXTRACT(HOUR FROM event_time) AS INT) AS `hour`
         FROM (
             SELECT
                 transaction_id,
@@ -292,6 +442,7 @@ def submit_insert(table_env: StreamTableEnvironment, config: JobConfig) -> None:
                 device_id,
                 amount,
                 currency,
+                `timestamp`,
                 event_time,
                 event_time_epoch_us,
                 location,
@@ -315,12 +466,12 @@ def submit_insert(table_env: StreamTableEnvironment, config: JobConfig) -> None:
     )
 
     LOGGER.info(
-        "Submitted streaming insert. Windowed output appears after each %s minute "
-        "window closes plus %s seconds of allowed lateness.",
+        "Submitted Bronze/Silver Iceberg inserts. Silver rows are emitted after "
+        "each %s minute event-time window closes plus %s seconds of allowed lateness.",
         config.dedup_window_minutes,
         config.watermark_lateness_seconds,
     )
-    insert_result.wait()
+    statement_set.execute().wait()
 
 
 def configure_logging(level: str) -> None:
@@ -336,6 +487,14 @@ def sql_literal(value: str) -> str:
     """Escape a Python string as a Flink SQL string literal."""
 
     return "'" + value.replace("'", "''") + "'"
+
+
+def sql_identifier(value: str) -> str:
+    """Validate a simple Flink SQL identifier."""
+
+    if not value or not value.replace("_", "").isalnum() or value[0].isdigit():
+        raise ValueError(f"Unsafe SQL identifier: {value!r}")
+    return value
 
 
 def _normalize_pipeline_jars(raw_value: str | None) -> str | None:

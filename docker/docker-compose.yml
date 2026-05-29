@@ -199,13 +199,15 @@ services:
       DBT_TRINO_HOST: trino
       DBT_TRINO_PORT: 8080
       DBT_TRINO_USER: admin
+      TRINO_STATEMENT_URL: http://trino:8080/v1/statement
+      TRINO_USER: admin
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
     volumes:
       - ..:/workspace
     entrypoint: [ "/bin/sh", "-lc" ]
     command:
       - >
-        apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/* && python -m pip install --no-cache-dir --root-user-action=ignore -r requirements.txt && dbt debug --profiles-dir . && dbt run --profiles-dir . --select gold && dbt test --profiles-dir . --select gold
+        apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/* && python -m pip install --no-cache-dir --root-user-action=ignore -r requirements.txt && python ../storage/iceberg_init.py && dbt debug --profiles-dir . && dbt run --profiles-dir . --select gold && dbt test --profiles-dir . --select gold
     networks:
       - fintech_network
 

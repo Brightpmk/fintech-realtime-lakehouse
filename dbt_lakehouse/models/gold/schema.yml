@@ -1,0 +1,69 @@
+version: 2
+
+sources:
+  - name: silver
+    database: "{{ env_var('DBT_TRINO_CATALOG', 'iceberg') }}"
+    schema: silver
+    description: Clean, deduplicated, masked transaction stream produced by PyFlink.
+    tables:
+      - name: transactions
+        description: Silver transaction fact stream partitioned by event time.
+        columns:
+          - name: transaction_id
+            tests:
+              - not_null
+          - name: event_time
+            tests:
+              - not_null
+          - name: amount
+            tests:
+              - not_null
+          - name: currency
+            tests:
+              - not_null
+
+models:
+  - name: gold_hourly_liquidity
+    description: Hourly transaction liquidity summary by event-time bucket and currency.
+    columns:
+      - name: hourly_liquidity_key
+        description: Stable analytical key built from hour bucket and currency.
+        tests:
+          - not_null
+          - unique
+      - name: hour_bucket
+        tests:
+          - not_null
+      - name: currency
+        tests:
+          - not_null
+      - name: transaction_count
+        tests:
+          - not_null
+      - name: total_amount
+        tests:
+          - not_null
+      - name: net_amount
+        tests:
+          - not_null
+
+  - name: gold_fraud_alerts
+    description: Suspicious transactions and high-risk threshold breaches for alerting.
+    columns:
+      - name: fraud_alert_key
+        description: Stable analytical key built from transaction id and event timestamp.
+        tests:
+          - not_null
+          - unique
+      - name: transaction_id
+        tests:
+          - not_null
+      - name: alert_reason
+        tests:
+          - not_null
+      - name: amount
+        tests:
+          - not_null
+      - name: event_time
+        tests:
+          - not_null

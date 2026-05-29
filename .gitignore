@@ -2,3 +2,10 @@
 __pycache__/
 *.pyc
 .DS_Store
+tmp/
+*.jar
+dbt_lakehouse/.user.yml
+dbt_lakehouse/logs/
+dbt_lakehouse/target/
+dbt_lakehouse/dbt_packages/
+logs/
