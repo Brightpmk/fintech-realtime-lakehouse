@@ -1,0 +1,26 @@
+name: fintech_realtime_lakehouse
+version: 1.0.0
+config-version: 2
+
+profile: fintech_realtime_lakehouse
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+analysis-paths: ["analyses"]
+seed-paths: ["seeds"]
+snapshot-paths: ["snapshots"]
+
+target-path: target
+clean-targets:
+  - target
+  - dbt_packages
+
+models:
+  fintech_realtime_lakehouse:
+    +materialized: table
+    +on_table_exists: drop
+    gold:
+      +schema: gold
+      +materialized: table
+      +on_table_exists: drop

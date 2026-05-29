@@ -1,0 +1,17 @@
+fintech_realtime_lakehouse:
+  target: dev
+  outputs:
+    dev:
+      type: trino
+      method: none
+      user: "{{ env_var('DBT_TRINO_USER', 'admin') }}"
+      host: "{{ env_var('DBT_TRINO_HOST', 'localhost') }}"
+      port: "{{ env_var('DBT_TRINO_PORT', '8080') | int }}"
+      database: "{{ env_var('DBT_TRINO_CATALOG', 'iceberg') }}"
+      schema: "{{ env_var('DBT_TRINO_SCHEMA', 'gold') }}"
+      http_scheme: "{{ env_var('DBT_TRINO_HTTP_SCHEME', 'http') }}"
+      threads: "{{ env_var('DBT_THREADS', '1') | int }}"
+      retries: "{{ env_var('DBT_TRINO_RETRIES', '3') | int }}"
+      prepared_statements_enabled: false
+      session_properties:
+        query_max_run_time: "30m"
