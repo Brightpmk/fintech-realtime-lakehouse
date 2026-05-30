@@ -10,3 +10,4 @@ dbt_lakehouse/logs/
 dbt_lakehouse/target/
 dbt_lakehouse/dbt_packages/
 logs/
+docs/
