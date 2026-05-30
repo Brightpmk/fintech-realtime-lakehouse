@@ -64,14 +64,31 @@ services:
     networks:
       - fintech_network
 
+  flink-checkpoints-init:
+    image: alpine:3.20
+    container_name: fintech-flink-checkpoints-init
+    user: "0:0"
+    command: >
+      /bin/sh -c "mkdir -p /opt/flink/checkpoints/kafka-to-iceberg &&
+      chown -R 9999:9999 /opt/flink/checkpoints"
+    volumes:
+      - flink_checkpoints:/opt/flink/checkpoints
+    networks:
+      - fintech_network
+
   flink-jobmanager:
-    image: flink:1.20.4-scala_2.12-java17
+    build:
+      context: .
+      dockerfile: flink/Dockerfile
+    image: fintech-flink-py:1.20.4
     container_name: fintech-flink-jobmanager
     hostname: flink-jobmanager
     command: jobmanager
     depends_on:
       kafka:
         condition: service_healthy
+      flink-checkpoints-init:
+        condition: service_completed_successfully
       minio-init:
         condition: service_completed_successfully
       iceberg-rest:
@@ -88,6 +105,8 @@ services:
       PII_HASH_SALT: ${PII_HASH_SALT:-local-dev-pii-salt-change-me}
       FLINK_PIPELINE_JARS: ${FLINK_PIPELINE_JARS:-}
       FLINK_JARS_DIR: /opt/flink/usrlib
+      PYFLINK_CLIENT_EXECUTABLE: python3
+      PYFLINK_PYTHON: python3
       FLINK_PROPERTIES: |
         jobmanager.rpc.address: flink-jobmanager
         rest.bind-address: 0.0.0.0
@@ -105,7 +124,10 @@ services:
       - fintech_network
 
   flink-taskmanager:
-    image: flink:1.20.4-scala_2.12-java17
+    build:
+      context: .
+      dockerfile: flink/Dockerfile
+    image: fintech-flink-py:1.20.4
     container_name: fintech-flink-taskmanager
     hostname: flink-taskmanager
     command: taskmanager
@@ -122,6 +144,8 @@ services:
       PII_HASH_SALT: ${PII_HASH_SALT:-local-dev-pii-salt-change-me}
       FLINK_PIPELINE_JARS: ${FLINK_PIPELINE_JARS:-}
       FLINK_JARS_DIR: /opt/flink/usrlib
+      PYFLINK_CLIENT_EXECUTABLE: python3
+      PYFLINK_PYTHON: python3
       FLINK_PROPERTIES: |
         jobmanager.rpc.address: flink-jobmanager
         taskmanager.numberOfTaskSlots: 4
