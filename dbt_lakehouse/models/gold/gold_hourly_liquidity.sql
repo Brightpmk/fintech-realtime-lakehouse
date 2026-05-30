@@ -60,7 +60,7 @@ with silver_transactions as (
 
 hourly_aggregates as (
     select
-        cast(date_trunc('hour', event_time) as timestamp(3)) as hour_bucket,
+        cast(date_trunc('hour', event_time) as timestamp(6)) as hour_bucket,
         currency,
         count(*) as transaction_count,
         count_if(is_flagged_suspicious) as suspicious_transaction_count,
@@ -72,7 +72,7 @@ hourly_aggregates as (
         hour
     from silver_transactions
     group by
-        cast(date_trunc('hour', event_time) as timestamp(3)),
+        cast(date_trunc('hour', event_time) as timestamp(6)),
         currency,
         year,
         month,
@@ -92,5 +92,5 @@ select
     month,
     day,
     hour,
-    cast(current_timestamp as timestamp(3)) as model_updated_at
+    cast(current_timestamp as timestamp(6)) as model_updated_at
 from hourly_aggregates
