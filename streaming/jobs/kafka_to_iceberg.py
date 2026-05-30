@@ -43,6 +43,7 @@ class JobConfig:
     s3_access_key_id: str = "admin"
     s3_secret_access_key: str = "password"
     s3_region: str = "us-east-1"
+    pii_hash_salt: str = "local-dev-pii-salt-change-me"
     dedup_window_minutes: int = 10
     watermark_lateness_seconds: int = 20
     checkpoint_interval_ms: int = 30_000
@@ -98,6 +99,7 @@ class JobConfig:
                 "AWS_SECRET_ACCESS_KEY", cls.s3_secret_access_key
             ),
             s3_region=os.getenv("AWS_REGION", cls.s3_region),
+            pii_hash_salt=os.getenv("PII_HASH_SALT", cls.pii_hash_salt),
             dedup_window_minutes=dedup_window_minutes,
             watermark_lateness_seconds=watermark_lateness_seconds,
             checkpoint_interval_ms=max(
@@ -112,10 +114,15 @@ class JobConfig:
             checkpoint_dir=os.getenv("FLINK_CHECKPOINT_DIR", cls.checkpoint_dir),
             rocksdb_local_dir=os.getenv("FLINK_ROCKSDB_LOCAL_DIR", cls.rocksdb_local_dir),
             parallelism=max(1, _int_env("FLINK_PARALLELISM", cls.parallelism)),
-            pipeline_jars=_normalize_pipeline_jars(
-                os.getenv("FLINK_PIPELINE_JARS")
-                or os.getenv("PYFLINK_PIPELINE_JARS")
-                or os.getenv("FLINK_CONNECTOR_JARS")
+            pipeline_jars=(
+                _normalize_pipeline_jars(
+                    os.getenv("FLINK_PIPELINE_JARS")
+                    or os.getenv("PYFLINK_PIPELINE_JARS")
+                    or os.getenv("FLINK_CONNECTOR_JARS")
+                )
+                or _discover_pipeline_jars(
+                    Path(os.getenv("FLINK_JARS_DIR", "/opt/flink/usrlib"))
+                )
             ),
             table_state_ttl=os.getenv(
                 "FLINK_TABLE_STATE_TTL", f"{default_state_ttl_minutes} min"
@@ -141,6 +148,11 @@ def main() -> None:
         config.s3_endpoint,
         config.consumer_group_id,
     )
+    if config.pii_hash_salt == JobConfig.pii_hash_salt:
+        LOGGER.warning(
+            "Using the local development PII hash salt. Set PII_HASH_SALT for "
+            "shared environments."
+        )
 
     _, table_env = build_environments(config)
     register_kafka_source(table_env, config)
@@ -251,7 +263,7 @@ def register_kafka_source(
         CREATE TABLE financial_transactions_raw (
             transaction_id STRING,
             account_id STRING,
-            amount DOUBLE,
+            amount DECIMAL(18, 2),
             currency STRING,
             `timestamp` STRING,
             event_time_epoch_us BIGINT,
@@ -270,9 +282,9 @@ def register_kafka_source(
             'properties.bootstrap.servers' = {sql_literal(config.kafka_bootstrap_servers)},
             'properties.group.id' = {sql_literal(config.consumer_group_id)},
             'scan.startup.mode' = {sql_literal(config.startup_mode)},
-            'format' = 'avro-confluent',
-            'avro-confluent.url' = {sql_literal(config.schema_registry_url)},
-            'avro-confluent.subject' = {sql_literal(config.schema_registry_subject)}
+            'value.format' = 'avro-confluent',
+            'value.avro-confluent.url' = {sql_literal(config.schema_registry_url)},
+            'value.avro-confluent.subject' = {sql_literal(config.schema_registry_subject)}
         )
         """
     )
@@ -324,7 +336,7 @@ def register_iceberg_catalog_and_tables(
         CREATE TABLE IF NOT EXISTS {catalog_name}.bronze.transactions (
             transaction_id STRING,
             account_id STRING,
-            amount DOUBLE,
+            amount DECIMAL(18, 2),
             currency STRING,
             `timestamp` STRING,
             event_time_epoch_us BIGINT,
@@ -341,7 +353,11 @@ def register_iceberg_catalog_and_tables(
         PARTITIONED BY (`year`, `month`, `day`, `hour`)
         WITH (
             'format-version' = '2',
-            'write.format.default' = 'parquet'
+            'write.format.default' = 'parquet',
+            'write.parquet.compression-codec' = 'zstd',
+            'write.target-file-size-bytes' = '134217728',
+            'write.metadata.delete-after-commit.enabled' = 'true',
+            'write.metadata.previous-versions-max' = '20'
         )
         """
     )
@@ -351,7 +367,7 @@ def register_iceberg_catalog_and_tables(
         CREATE TABLE IF NOT EXISTS {catalog_name}.silver.transactions (
             transaction_id STRING,
             account_id STRING,
-            amount DOUBLE,
+            amount DECIMAL(18, 2),
             currency STRING,
             `timestamp` STRING,
             event_time_epoch_us BIGINT,
@@ -370,7 +386,11 @@ def register_iceberg_catalog_and_tables(
         PARTITIONED BY (`year`, `month`, `day`, `hour`)
         WITH (
             'format-version' = '2',
-            'write.format.default' = 'parquet'
+            'write.format.default' = 'parquet',
+            'write.parquet.compression-codec' = 'zstd',
+            'write.target-file-size-bytes' = '134217728',
+            'write.metadata.delete-after-commit.enabled' = 'true',
+            'write.metadata.previous-versions-max' = '20'
         )
         """
     )
@@ -417,13 +437,33 @@ def submit_medallion_inserts(
         INSERT INTO {catalog_name}.silver.transactions
         SELECT
             transaction_id,
-            CONCAT('ACC-SHA256-', SUBSTRING(SHA2(COALESCE(account_id, ''), 256), 1, 16))
+            CONCAT(
+                'ACC-SHA256-',
+                SUBSTRING(
+                    SHA2(
+                        CONCAT({sql_literal(config.pii_hash_salt)}, ':', COALESCE(account_id, '')),
+                        256
+                    ),
+                    1,
+                    16
+                )
+            )
                 AS account_id,
             amount,
             currency,
             `timestamp`,
             event_time_epoch_us,
-            CONCAT('DEV-SHA256-', SUBSTRING(SHA2(COALESCE(device_id, ''), 256), 1, 16))
+            CONCAT(
+                'DEV-SHA256-',
+                SUBSTRING(
+                    SHA2(
+                        CONCAT({sql_literal(config.pii_hash_salt)}, ':', COALESCE(device_id, '')),
+                        256
+                    ),
+                    1,
+                    16
+                )
+            )
                 AS device_id,
             location,
             is_flagged_suspicious,
@@ -512,6 +552,14 @@ def _normalize_pipeline_jars(raw_value: str | None) -> str | None:
             normalized.append(Path(jar).expanduser().resolve().as_uri())
 
     return ";".join(normalized) if normalized else None
+
+
+def _discover_pipeline_jars(jars_dir: Path) -> str | None:
+    if not jars_dir.exists() or not jars_dir.is_dir():
+        return None
+
+    jar_uris = [jar.resolve().as_uri() for jar in sorted(jars_dir.glob("*.jar"))]
+    return ";".join(jar_uris) if jar_uris else None
 
 
 def _int_env(name: str, default: int) -> int:

@@ -34,6 +34,23 @@ class KafkaToIcebergConfigTests(unittest.TestCase):
         self.assertIn(jar_path.resolve().as_uri(), normalized)
         self.assertIn("https://repo.example/flink-iceberg.jar", normalized)
 
+    def test_discover_pipeline_jars_scans_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            jars_dir = Path(tmp_dir)
+            first_jar = jars_dir / "a.jar"
+            second_jar = jars_dir / "b.jar"
+            first_jar.touch()
+            second_jar.touch()
+
+            discovered = job._discover_pipeline_jars(jars_dir)
+
+        self.assertIsNotNone(discovered)
+        assert discovered is not None
+        self.assertEqual(
+            discovered,
+            ";".join([first_jar.resolve().as_uri(), second_jar.resolve().as_uri()]),
+        )
+
     def test_job_config_from_env_clamps_operational_values(self) -> None:
         env = {
             "KAFKA_TOPIC": "financial.test",
@@ -56,6 +73,7 @@ class KafkaToIcebergConfigTests(unittest.TestCase):
         self.assertEqual(config.checkpoint_interval_ms, 1_000)
         self.assertEqual(config.checkpoint_timeout_ms, 10_000)
         self.assertEqual(config.table_state_ttl, "42 min")
+        self.assertEqual(config.pii_hash_salt, job.JobConfig.pii_hash_salt)
 
 
 if __name__ == "__main__":
