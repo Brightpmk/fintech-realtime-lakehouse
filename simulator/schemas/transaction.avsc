@@ -16,8 +16,13 @@
     },
     {
       "name": "amount",
-      "type": "double",
-      "doc": "Transaction amount in the transaction currency."
+      "type": {
+        "type": "bytes",
+        "logicalType": "decimal",
+        "precision": 18,
+        "scale": 2
+      },
+      "doc": "Transaction amount in the transaction currency as a fixed precision decimal."
     },
     {
       "name": "currency",

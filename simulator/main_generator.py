@@ -18,6 +18,7 @@ import uuid
 import calendar
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,7 @@ from faker import Faker
 
 LOGGER = logging.getLogger("transaction-simulator")
 DEFAULT_SCHEMA_PATH = Path(__file__).parent / "schemas" / "transaction.avsc"
+MONEY_QUANTUM = Decimal("0.01")
 
 
 @dataclass(frozen=True)
@@ -101,7 +103,7 @@ class TransactionFactory:
         return {
             "transaction_id": str(uuid.uuid4()),
             "account_id": f"acct_{uuid.uuid4().hex[:12]}",
-            "amount": 0.0,
+            "amount": Decimal("0.00"),
             "currency": random.choice(self.currencies),
             "timestamp": now.isoformat(),
             "event_time_epoch_us": calendar.timegm(now.utctimetuple()) * 1_000_000 + now.microsecond,
@@ -123,7 +125,7 @@ class TransactionFactory:
         else:
             amount = random.lognormvariate(mu=3.3, sigma=0.75)
 
-        record["amount"] = round(max(amount, 1.0), 2)
+        record["amount"] = _money(max(amount, 1.0))
         return record
 
     def _create_anomaly(self) -> dict[str, Any]:
@@ -131,14 +133,14 @@ class TransactionFactory:
         anomaly_type = random.choice(("high_amount", "rapid_fire", "geo_velocity"))
 
         if anomaly_type == "high_amount":
-            record["amount"] = round(random.uniform(25_000.0, 500_000.0), 2)
+            record["amount"] = _money(random.uniform(25_000.0, 500_000.0))
             record["account_id"] = random.choice(self.hot_accounts)
         elif anomaly_type == "rapid_fire":
-            record["amount"] = round(random.uniform(1.0, 250.0), 2)
+            record["amount"] = _money(random.uniform(1.0, 250.0))
             record["account_id"] = random.choice(self.hot_accounts)
             record["device_id"] = random.choice(self.hot_devices)
         else:
-            record["amount"] = round(random.uniform(500.0, 8_000.0), 2)
+            record["amount"] = _money(random.uniform(500.0, 8_000.0))
             record["account_id"] = random.choice(self.hot_accounts)
             record["location"] = random.choice(("Bangkok, TH", "New York, US", "Lagos, NG", "Sao Paulo, BR"))
 
@@ -356,6 +358,10 @@ def _validate_schema_json(schema_str: str, schema_path: Path) -> None:
         json.loads(schema_str)
     except json.JSONDecodeError as exc:
         raise ValueError(f"Invalid Avro schema JSON at {schema_path}: {exc}") from exc
+
+
+def _money(value: float | int | str | Decimal) -> Decimal:
+    return Decimal(str(value)).quantize(MONEY_QUANTUM, rounding=ROUND_HALF_UP)
 
 
 def _int_env(name: str, default: int) -> int:

@@ -15,10 +15,34 @@ sources:
           - name: event_time
             tests:
               - not_null
+          - name: event_time_epoch_us
+            tests:
+              - not_null
           - name: amount
             tests:
               - not_null
           - name: currency
+            tests:
+              - not_null
+              - accepted_values:
+                  arguments:
+                    values: ["USD", "THB", "EUR", "SGD", "JPY"]
+          - name: account_id
+            tests:
+              - not_null
+          - name: device_id
+            tests:
+              - not_null
+          - name: year
+            tests:
+              - not_null
+          - name: month
+            tests:
+              - not_null
+          - name: day
+            tests:
+              - not_null
+          - name: hour
             tests:
               - not_null
 
@@ -37,13 +61,31 @@ models:
       - name: currency
         tests:
           - not_null
+          - accepted_values:
+              arguments:
+                values: ["USD", "THB", "EUR", "SGD", "JPY"]
       - name: transaction_count
+        tests:
+          - not_null
+      - name: suspicious_transaction_count
         tests:
           - not_null
       - name: total_amount
         tests:
           - not_null
       - name: net_amount
+        tests:
+          - not_null
+      - name: year
+        tests:
+          - not_null
+      - name: month
+        tests:
+          - not_null
+      - name: day
+        tests:
+          - not_null
+      - name: hour
         tests:
           - not_null
 
@@ -58,12 +100,41 @@ models:
       - name: transaction_id
         tests:
           - not_null
+      - name: account_id
+        tests:
+          - not_null
+      - name: device_id
+        tests:
+          - not_null
       - name: alert_reason
         tests:
           - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - SIMULATOR_FLAG
+                  - HIGH_AMOUNT_HIGH_RISK_LOCATION
+                  - HIGH_AMOUNT
+                  - ELEVATED_AMOUNT_HIGH_RISK_LOCATION
+                  - RISK_RULE_MATCH
       - name: amount
         tests:
           - not_null
       - name: event_time
+        tests:
+          - not_null
+      - name: event_time_epoch_us
+        tests:
+          - not_null
+      - name: year
+        tests:
+          - not_null
+      - name: month
+        tests:
+          - not_null
+      - name: day
+        tests:
+          - not_null
+      - name: hour
         tests:
           - not_null

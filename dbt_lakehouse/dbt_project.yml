@@ -18,9 +18,8 @@ clean-targets:
 
 models:
   fintech_realtime_lakehouse:
-    +materialized: table
-    +on_table_exists: drop
     gold:
       +schema: gold
-      +materialized: table
-      +on_table_exists: drop
+      +materialized: incremental
+      +incremental_strategy: merge
+      +on_schema_change: sync_all_columns
