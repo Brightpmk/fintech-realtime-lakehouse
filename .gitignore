@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 .DS_Store
+.env
 tmp/
 *.jar
 dbt_lakehouse/.user.yml
