@@ -102,6 +102,16 @@ alerts as (
     where is_flagged_suspicious
        or amount > cast(10000.00 as decimal(18, 2))
        or (amount > cast(5000.00 as decimal(18, 2)) and is_high_risk_location)
+),
+
+deduped_alerts as (
+    select 
+        *,
+        row_number() over (
+            partition by fraud_alert_key 
+            order by event_time desc
+        ) as row_num
+    from alerts
 )
 
 select
@@ -120,5 +130,6 @@ select
     month,
     day,
     hour,
-    cast(current_timestamp as timestamp(3)) as model_updated_at
-from alerts
+    cast(current_timestamp as timestamp(6)) as model_updated_at
+from deduped_alerts
+where row_num = 1

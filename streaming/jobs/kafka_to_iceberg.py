@@ -49,7 +49,7 @@ class JobConfig:
     checkpoint_interval_ms: int = 30_000
     checkpoint_min_pause_ms: int = 10_000
     checkpoint_timeout_ms: int = 120_000
-    checkpoint_dir: str = "file:///tmp/flink/checkpoints/kafka-to-iceberg"
+    checkpoint_dir: str = "s3://warehouse/flink-checkpoints/kafka-to-iceberg"
     rocksdb_local_dir: str = "/tmp/flink/rocksdb/kafka-to-iceberg"
     parallelism: int = 2
     pipeline_jars: str | None = None
@@ -343,8 +343,8 @@ def register_iceberg_catalog_and_tables(
             device_id STRING,
             location STRING,
             is_flagged_suspicious BOOLEAN,
-            event_time TIMESTAMP(3),
-            ingest_time TIMESTAMP(3),
+            event_time TIMESTAMP(6),
+            ingest_time TIMESTAMP(6),
             `year` INT,
             `month` INT,
             `day` INT,
@@ -374,10 +374,10 @@ def register_iceberg_catalog_and_tables(
             device_id STRING,
             location STRING,
             is_flagged_suspicious BOOLEAN,
-            event_time TIMESTAMP(3),
-            dedup_window_start TIMESTAMP(3),
-            dedup_window_end TIMESTAMP(3),
-            ingest_time TIMESTAMP(3),
+            event_time TIMESTAMP(6),
+            dedup_window_start TIMESTAMP(6),
+            dedup_window_end TIMESTAMP(6),
+            ingest_time TIMESTAMP(6),
             `year` INT,
             `month` INT,
             `day` INT,
@@ -420,8 +420,11 @@ def submit_medallion_inserts(
             device_id,
             location,
             is_flagged_suspicious,
-            CAST(event_time AS TIMESTAMP(3)) AS event_time,
-            CAST(CURRENT_TIMESTAMP AS TIMESTAMP(3)) AS ingest_time,
+            CASE 
+                WHEN event_time IS NULL THEN NULL 
+                ELSE CAST(event_time AS TIMESTAMP(6)) 
+            END AS event_time,
+            CAST(CURRENT_TIMESTAMP AS TIMESTAMP(6)) AS ingest_time,
             CAST(EXTRACT(YEAR FROM event_time) AS INT) AS `year`,
             CAST(EXTRACT(MONTH FROM event_time) AS INT) AS `month`,
             CAST(EXTRACT(DAY FROM event_time) AS INT) AS `day`,
@@ -467,10 +470,10 @@ def submit_medallion_inserts(
                 AS device_id,
             location,
             is_flagged_suspicious,
-            CAST(event_time AS TIMESTAMP(3)) AS event_time,
-            CAST(window_start AS TIMESTAMP(3)) AS dedup_window_start,
-            CAST(window_end AS TIMESTAMP(3)) AS dedup_window_end,
-            CAST(CURRENT_TIMESTAMP AS TIMESTAMP(3)) AS ingest_time,
+            CAST(event_time AS TIMESTAMP(6)) AS event_time,
+            CAST(window_start AS TIMESTAMP(6)) AS dedup_window_start,
+            CAST(window_end AS TIMESTAMP(6)) AS dedup_window_end,
+            CAST(CURRENT_TIMESTAMP AS TIMESTAMP(6)) AS ingest_time,
             CAST(EXTRACT(YEAR FROM event_time) AS INT) AS `year`,
             CAST(EXTRACT(MONTH FROM event_time) AS INT) AS `month`,
             CAST(EXTRACT(DAY FROM event_time) AS INT) AS `day`,
