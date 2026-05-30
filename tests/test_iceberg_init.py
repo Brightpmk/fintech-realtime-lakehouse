@@ -15,7 +15,10 @@ class IcebergInitTests(unittest.TestCase):
         self.assertIn("CREATE SCHEMA IF NOT EXISTS iceberg.gold", rendered)
         self.assertIn("CREATE TABLE IF NOT EXISTS iceberg.bronze.transactions", rendered)
         self.assertIn("CREATE TABLE IF NOT EXISTS iceberg.silver.transactions", rendered)
+        self.assertIn("amount decimal(18, 2)", rendered)
+        self.assertIn("compression_codec = 'ZSTD'", rendered)
         self.assertIn("partitioning = ARRAY['year', 'month', 'day', 'hour']", rendered)
+        self.assertIn("object_store_layout_enabled = true", rendered)
         self.assertNotIn("gold_hourly_liquidity", rendered)
 
     def test_build_init_statements_rejects_unsafe_catalog(self) -> None:

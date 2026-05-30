@@ -43,6 +43,21 @@ class IcebergMaintenanceTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 iceberg_maintenance.parse_tables()
 
+    def test_threshold_validators_accept_safe_values(self) -> None:
+        self.assertEqual(iceberg_maintenance.validate_size_threshold("128mb"), "128MB")
+        self.assertEqual(iceberg_maintenance.validate_duration_threshold("7D"), "7d")
+
+    def test_threshold_validators_reject_unsafe_values(self) -> None:
+        for value in ("0MB", "64 MB", "64MB'); drop table x; --"):
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    iceberg_maintenance.validate_size_threshold(value)
+
+        for value in ("0d", "7 days", "7d'); drop table x; --"):
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    iceberg_maintenance.validate_duration_threshold(value)
+
 
 if __name__ == "__main__":
     unittest.main()

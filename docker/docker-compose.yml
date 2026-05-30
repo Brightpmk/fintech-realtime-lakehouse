@@ -1,10 +1,10 @@
 name: fintech-realtime-lakehouse
 
 x-aws-env: &aws-env
-  AWS_ACCESS_KEY_ID: admin
-  AWS_SECRET_ACCESS_KEY: password
-  AWS_REGION: us-east-1
-  AWS_DEFAULT_REGION: us-east-1
+  AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-admin}
+  AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-password}
+  AWS_REGION: ${AWS_REGION:-us-east-1}
+  AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
 
 services:
   kafka:
@@ -81,6 +81,13 @@ services:
     environment:
       <<: *aws-env
       FLINK_CHECKPOINT_DIR: file:///opt/flink/checkpoints/kafka-to-iceberg
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      ICEBERG_REST_URI: http://iceberg-rest:8181
+      S3_ENDPOINT: http://minio:9000
+      PII_HASH_SALT: ${PII_HASH_SALT:-local-dev-pii-salt-change-me}
+      FLINK_PIPELINE_JARS: ${FLINK_PIPELINE_JARS:-}
+      FLINK_JARS_DIR: /opt/flink/usrlib
       FLINK_PROPERTIES: |
         jobmanager.rpc.address: flink-jobmanager
         rest.bind-address: 0.0.0.0
@@ -93,6 +100,7 @@ services:
         s3.path.style.access: true
     volumes:
       - flink_checkpoints:/opt/flink/checkpoints
+      - ../tmp/jars:/opt/flink/usrlib:ro
     networks:
       - fintech_network
 
@@ -107,6 +115,13 @@ services:
     environment:
       <<: *aws-env
       FLINK_CHECKPOINT_DIR: file:///opt/flink/checkpoints/kafka-to-iceberg
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      ICEBERG_REST_URI: http://iceberg-rest:8181
+      S3_ENDPOINT: http://minio:9000
+      PII_HASH_SALT: ${PII_HASH_SALT:-local-dev-pii-salt-change-me}
+      FLINK_PIPELINE_JARS: ${FLINK_PIPELINE_JARS:-}
+      FLINK_JARS_DIR: /opt/flink/usrlib
       FLINK_PROPERTIES: |
         jobmanager.rpc.address: flink-jobmanager
         taskmanager.numberOfTaskSlots: 4
@@ -116,6 +131,7 @@ services:
         s3.path.style.access: true
     volumes:
       - flink_checkpoints:/opt/flink/checkpoints
+      - ../tmp/jars:/opt/flink/usrlib:ro
     networks:
       - fintech_network
 
@@ -128,9 +144,9 @@ services:
       - "9000:9000"
       - "9001:9001"
     environment:
-      MINIO_ROOT_USER: admin
-      MINIO_ROOT_PASSWORD: password
-      MINIO_REGION_NAME: us-east-1
+      MINIO_ROOT_USER: ${AWS_ACCESS_KEY_ID:-admin}
+      MINIO_ROOT_PASSWORD: ${AWS_SECRET_ACCESS_KEY:-password}
+      MINIO_REGION_NAME: ${AWS_REGION:-us-east-1}
       MINIO_DOMAIN: minio
     volumes:
       - minio_data:/data
@@ -154,7 +170,7 @@ services:
     environment:
       <<: *aws-env
     entrypoint: >
-      /bin/sh -c " mc alias set local http://minio:9000 admin password && mc mb --ignore-existing local/warehouse && mc anonymous set none local/warehouse "
+      /bin/sh -c " mc alias set local http://minio:9000 $$AWS_ACCESS_KEY_ID $$AWS_SECRET_ACCESS_KEY && mc mb --ignore-existing local/warehouse && mc anonymous set none local/warehouse "
     networks:
       - fintech_network
 
@@ -162,6 +178,7 @@ services:
     image: apache/iceberg-rest-fixture:1.10.1
     container_name: fintech-iceberg-rest
     hostname: iceberg-rest
+    user: "0:0"
     depends_on:
       minio-init:
         condition: service_completed_successfully
@@ -169,13 +186,15 @@ services:
       - "8181:8181"
     environment:
       <<: *aws-env
-      CATALOG_URI: jdbc:sqlite:/tmp/iceberg_catalog.db?journal_mode=WAL&busy_timeout=60000
+      CATALOG_URI: jdbc:sqlite:/catalog/iceberg_catalog.db?journal_mode=WAL&busy_timeout=60000
       CATALOG_WAREHOUSE: s3://warehouse/
       CATALOG_IO__IMPL: org.apache.iceberg.aws.s3.S3FileIO
       CATALOG_S3_ENDPOINT: http://minio:9000
       CATALOG_S3_PATH__STYLE__ACCESS: "true"
-      CATALOG_S3_ACCESS__KEY__ID: admin
-      CATALOG_S3_SECRET__ACCESS__KEY: password
+      CATALOG_S3_ACCESS__KEY__ID: ${AWS_ACCESS_KEY_ID:-admin}
+      CATALOG_S3_SECRET__ACCESS__KEY: ${AWS_SECRET_ACCESS_KEY:-password}
+    volumes:
+      - iceberg_catalog:/catalog
     healthcheck:
       test: [ "CMD-SHELL", "curl -fsS http://localhost:8181/v1/config >/dev/null" ]
       interval: 10s
@@ -198,9 +217,10 @@ services:
       DEBIAN_FRONTEND: noninteractive
       DBT_TRINO_HOST: trino
       DBT_TRINO_PORT: 8080
-      DBT_TRINO_USER: admin
+      DBT_TRINO_USER: ${TRINO_USER:-admin}
+      DBT_THREADS: 1
       TRINO_STATEMENT_URL: http://trino:8080/v1/statement
-      TRINO_USER: admin
+      TRINO_USER: ${TRINO_USER:-admin}
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
     volumes:
       - ..:/workspace
@@ -222,8 +242,8 @@ services:
     working_dir: /workspace
     environment:
       TRINO_STATEMENT_URL: http://trino:8080/v1/statement
-      TRINO_USER: admin
-      ICEBERG_MAINTENANCE_TABLES: iceberg.silver.transactions
+      TRINO_USER: ${TRINO_USER:-admin}
+      ICEBERG_MAINTENANCE_TABLES: iceberg.bronze.transactions,iceberg.silver.transactions,iceberg.gold.gold_hourly_liquidity,iceberg.gold.gold_fraud_alerts
       ICEBERG_MAINTENANCE_FILE_SIZE_THRESHOLD: 64MB
       ICEBERG_MAINTENANCE_RETENTION_THRESHOLD: 7d
       ICEBERG_MAINTENANCE_RETAIN_LAST: 10
@@ -268,3 +288,4 @@ volumes:
   kafka_data:
   minio_data:
   flink_checkpoints:
+  iceberg_catalog:

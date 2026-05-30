@@ -192,7 +192,7 @@ def build_init_statements(catalog: str) -> list[str]:
         CREATE TABLE IF NOT EXISTS {catalog}.bronze.transactions (
             transaction_id varchar,
             account_id varchar,
-            amount double,
+            amount decimal(18, 2),
             currency varchar,
             "timestamp" varchar,
             event_time_epoch_us bigint,
@@ -209,14 +209,20 @@ def build_init_statements(catalog: str) -> list[str]:
         WITH (
             format = 'PARQUET',
             format_version = 2,
-            partitioning = ARRAY['year', 'month', 'day', 'hour']
+            compression_codec = 'ZSTD',
+            partitioning = ARRAY['year', 'month', 'day', 'hour'],
+            sorted_by = ARRAY['event_time', 'transaction_id'],
+            max_commit_retry = 10,
+            delete_after_commit_enabled = true,
+            max_previous_versions = 20,
+            object_store_layout_enabled = true
         )
         """,
         f"""
         CREATE TABLE IF NOT EXISTS {catalog}.silver.transactions (
             transaction_id varchar,
             account_id varchar,
-            amount double,
+            amount decimal(18, 2),
             currency varchar,
             "timestamp" varchar,
             event_time_epoch_us bigint,
@@ -235,7 +241,13 @@ def build_init_statements(catalog: str) -> list[str]:
         WITH (
             format = 'PARQUET',
             format_version = 2,
-            partitioning = ARRAY['year', 'month', 'day', 'hour']
+            compression_codec = 'ZSTD',
+            partitioning = ARRAY['year', 'month', 'day', 'hour'],
+            sorted_by = ARRAY['event_time', 'transaction_id'],
+            max_commit_retry = 10,
+            delete_after_commit_enabled = true,
+            max_previous_versions = 20,
+            object_store_layout_enabled = true
         )
         """,
     ]
