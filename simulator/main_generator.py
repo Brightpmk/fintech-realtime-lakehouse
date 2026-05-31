@@ -15,24 +15,60 @@ import signal
 import threading
 import time
 import uuid
-import calendar
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 from typing import Any
 
-from confluent_kafka import KafkaError, Producer
-from confluent_kafka.schema_registry import SchemaRegistryClient
-from confluent_kafka.schema_registry.avro import AvroSerializer
-from confluent_kafka.schema_registry.error import SchemaRegistryError
-from confluent_kafka.serialization import MessageField, SerializationContext, StringSerializer
-from faker import Faker
+try:
+    from confluent_kafka import KafkaError, Producer
+    from confluent_kafka.schema_registry import Schema, SchemaRegistryClient
+    from confluent_kafka.schema_registry.avro import AvroSerializer
+    from confluent_kafka.schema_registry.error import SchemaRegistryError
+    from confluent_kafka.serialization import (
+        MessageField,
+        SerializationContext,
+        StringSerializer,
+    )
+except ImportError:  
+    KafkaError = Any 
+    Producer = None 
+    Schema = None 
+    SchemaRegistryClient = None 
+    AvroSerializer = None 
+    MessageField = None 
+    SerializationContext = None
+    StringSerializer = None 
+
+    class SchemaRegistryError(Exception):
+        """Fallback so contract tests can import this module without Kafka deps."""
+
+
+try:
+    from faker import Faker
+except ImportError: 
+    Faker = None 
+
+try:
+    from fastavro import parse_schema
+except ImportError: 
+    parse_schema = None 
 
 
 LOGGER = logging.getLogger("transaction-simulator")
 DEFAULT_SCHEMA_PATH = Path(__file__).parent / "schemas" / "transaction.avsc"
 MONEY_QUANTUM = Decimal("0.01")
+DEFAULT_SCHEMA_COMPATIBILITY = "BACKWARD_TRANSITIVE"
+ALLOWED_SCHEMA_COMPATIBILITY_MODES = {
+    "NONE",
+    "BACKWARD",
+    "BACKWARD_TRANSITIVE",
+    "FORWARD",
+    "FORWARD_TRANSITIVE",
+    "FULL",
+    "FULL_TRANSITIVE",
+}
 
 
 @dataclass(frozen=True)
@@ -42,6 +78,9 @@ class SimulatorConfig:
     bootstrap_servers: str = "localhost:9092"
     schema_registry_url: str = "http://localhost:8081"
     topic: str = "financial.transactions"
+    schema_registry_subject: str = "financial.transactions-value"
+    schema_registry_compatibility: str = DEFAULT_SCHEMA_COMPATIBILITY
+    enforce_schema_registry_compatibility: bool = True
     schema_path: Path = DEFAULT_SCHEMA_PATH
     target_events_per_second: int = 75
     worker_count: int = 2
@@ -58,6 +97,20 @@ class SimulatorConfig:
             bootstrap_servers=os.getenv("KAFKA_BOOTSTRAP_SERVERS", cls.bootstrap_servers),
             schema_registry_url=os.getenv("SCHEMA_REGISTRY_URL", cls.schema_registry_url),
             topic=os.getenv("KAFKA_TOPIC", cls.topic),
+            schema_registry_subject=os.getenv(
+                "SCHEMA_REGISTRY_SUBJECT",
+                f"{os.getenv('KAFKA_TOPIC', cls.topic)}-value",
+            ),
+            schema_registry_compatibility=normalize_schema_registry_compatibility(
+                os.getenv(
+                    "SCHEMA_REGISTRY_COMPATIBILITY",
+                    cls.schema_registry_compatibility,
+                )
+            ),
+            enforce_schema_registry_compatibility=_bool_env(
+                "ENFORCE_SCHEMA_REGISTRY_COMPATIBILITY",
+                cls.enforce_schema_registry_compatibility,
+            ),
             schema_path=Path(os.getenv("TRANSACTION_SCHEMA_PATH", str(DEFAULT_SCHEMA_PATH))),
             target_events_per_second=_int_env("TARGET_EVENTS_PER_SECOND", cls.target_events_per_second),
             worker_count=max(1, _int_env("SIMULATOR_WORKER_COUNT", cls.worker_count)),
@@ -84,7 +137,8 @@ class TransactionFactory:
     )
 
     def __init__(self, anomaly_rate: float) -> None:
-        self.fake = Faker()
+        faker_cls = _require_faker()
+        self.fake = faker_cls()
         self.anomaly_rate = min(max(anomaly_rate, 0.0), 1.0)
         self.hot_accounts = [f"acct_{uuid.uuid4().hex[:12]}" for _ in range(25)]
         self.hot_devices = [f"dev_{uuid.uuid4().hex[:12]}" for _ in range(10)]
@@ -105,8 +159,7 @@ class TransactionFactory:
             "account_id": f"acct_{uuid.uuid4().hex[:12]}",
             "amount": Decimal("0.00"),
             "currency": random.choice(self.currencies),
-            "timestamp": now.isoformat(),
-            "event_time_epoch_us": calendar.timegm(now.utctimetuple()) * 1_000_000 + now.microsecond,
+            "event_time_epoch_us": epoch_microseconds(now),
             "device_id": f"dev_{uuid.uuid4().hex[:12]}",
             "location": f"{city}, {country}",
             "is_flagged_suspicious": flagged,
@@ -152,6 +205,7 @@ class TransactionProducer:
 
     def __init__(self, config: SimulatorConfig) -> None:
         self.config = config
+        _require_confluent_kafka()
         self.producer = Producer(
             {
                 "bootstrap.servers": config.bootstrap_servers,
@@ -218,10 +272,17 @@ class TransactionProducer:
             raise FileNotFoundError(f"Avro schema not found: {self.config.schema_path}")
 
         schema_str = self.config.schema_path.read_text(encoding="utf-8")
-        _validate_schema_json(schema_str, self.config.schema_path)
+        _validate_avro_schema(schema_str, self.config.schema_path)
 
         schema_registry_conf = {"url": self.config.schema_registry_url}
         schema_registry_client = SchemaRegistryClient(schema_registry_conf)
+        if self.config.enforce_schema_registry_compatibility:
+            ensure_schema_registry_compatibility(
+                schema_registry_client=schema_registry_client,
+                subject=self.config.schema_registry_subject,
+                compatibility=self.config.schema_registry_compatibility,
+                schema_str=schema_str,
+            )
         return AvroSerializer(schema_registry_client, schema_str, conf={"auto.register.schemas": True})
 
     def _delivery_report(self, error: KafkaError | None, message: Any) -> None:
@@ -353,11 +414,171 @@ def install_signal_handlers(stop_event: threading.Event) -> None:
     signal.signal(signal.SIGTERM, _handler)
 
 
-def _validate_schema_json(schema_str: str, schema_path: Path) -> None:
+def epoch_microseconds(value: datetime) -> int:
+    """Return exact Unix epoch microseconds for an aware datetime."""
+
+    if value.tzinfo is None:
+        raise ValueError("event time must be timezone-aware")
+
+    utc_value = value.astimezone(UTC)
+    epoch = datetime(1970, 1, 1, tzinfo=UTC)
+    delta = utc_value - epoch
+    return (delta.days * 86_400 + delta.seconds) * 1_000_000 + delta.microseconds
+
+
+def ensure_schema_registry_compatibility(
+    *,
+    schema_registry_client: Any,
+    subject: str,
+    compatibility: str,
+    schema_str: str,
+) -> None:
+    """Pin and preflight the subject compatibility policy before producing."""
+
+    compatibility = normalize_schema_registry_compatibility(compatibility)
+    schema_registry_client.set_compatibility(
+        subject_name=subject,
+        level=compatibility,
+    )
+    LOGGER.info(
+        "Schema Registry subject=%s compatibility=%s",
+        subject,
+        compatibility,
+    )
+
+    if Schema is None:
+        return
+
+    schema = Schema(schema_str, "AVRO")
     try:
-        json.loads(schema_str)
+        schema_registry_client.get_latest_version(subject)
+    except SchemaRegistryError as exc:
+        if _schema_registry_error_code(exc) in {40401, 40403}:
+            return
+        raise
+
+    if not schema_registry_client.test_compatibility(subject, schema, version="latest"):
+        raise ValueError(
+            f"Avro schema is not {compatibility} compatible with latest subject "
+            f"{subject!r}"
+        )
+
+
+def normalize_schema_registry_compatibility(value: str) -> str:
+    normalized = value.strip().upper()
+    if normalized not in ALLOWED_SCHEMA_COMPATIBILITY_MODES:
+        raise ValueError(f"Unsupported Schema Registry compatibility mode: {value!r}")
+    return normalized
+
+
+def _validate_avro_schema(schema_str: str, schema_path: Path) -> dict[str, Any]:
+    try:
+        schema_dict = json.loads(schema_str)
     except json.JSONDecodeError as exc:
         raise ValueError(f"Invalid Avro schema JSON at {schema_path}: {exc}") from exc
+
+    if parse_schema is not None:
+        try:
+            parse_schema(schema_dict)
+        except Exception as exc:
+            raise ValueError(f"Invalid Avro schema semantics at {schema_path}: {exc}") from exc
+    else:
+        LOGGER.warning(
+            "fastavro is not installed; falling back to structural schema checks only"
+        )
+
+    validate_transaction_schema_contract(schema_dict, schema_path)
+    return schema_dict
+
+
+def validate_transaction_schema_contract(
+    schema_dict: dict[str, Any],
+    schema_path: Path,
+) -> None:
+    """Validate fields that must stay aligned across Kafka, Flink, and Iceberg."""
+
+    if schema_dict.get("type") != "record":
+        raise ValueError(f"Transaction schema must be an Avro record: {schema_path}")
+
+    fields = {
+        field.get("name"): field
+        for field in schema_dict.get("fields", [])
+        if isinstance(field, dict)
+    }
+    required_fields = {
+        "transaction_id",
+        "account_id",
+        "amount",
+        "currency",
+        "event_time_epoch_us",
+        "device_id",
+        "location",
+        "is_flagged_suspicious",
+    }
+    missing_fields = sorted(required_fields - fields.keys())
+    if missing_fields:
+        raise ValueError(
+            f"Transaction schema missing required fields {missing_fields}: {schema_path}"
+        )
+
+    if "timestamp" in fields:
+        raise ValueError(
+            "Transaction schema must not carry redundant timestamp string; "
+            "event_time_epoch_us is authoritative"
+        )
+
+    if fields["event_time_epoch_us"].get("type") != "long":
+        raise ValueError("event_time_epoch_us must be a non-null Avro long")
+
+    amount_type = fields["amount"].get("type")
+    if not isinstance(amount_type, dict):
+        raise ValueError("amount must be an Avro decimal logical type")
+
+    expected_amount_contract = {
+        "type": "bytes",
+        "logicalType": "decimal",
+        "precision": 18,
+        "scale": 2,
+    }
+    for key, expected_value in expected_amount_contract.items():
+        if amount_type.get(key) != expected_value:
+            raise ValueError(
+                f"amount {key} must be {expected_value!r}, got "
+                f"{amount_type.get(key)!r}"
+            )
+
+
+def _schema_registry_error_code(exc: Exception) -> int | None:
+    error_code = getattr(exc, "error_code", None)
+    if callable(error_code):
+        return error_code()
+    if isinstance(error_code, int):
+        return error_code
+    return None
+
+
+def _require_confluent_kafka() -> None:
+    if (
+        Producer is None
+        or SchemaRegistryClient is None
+        or AvroSerializer is None
+        or MessageField is None
+        or SerializationContext is None
+        or StringSerializer is None
+    ):
+        raise RuntimeError(
+            "confluent-kafka[avro] is required to run the simulator. "
+            "Install dependencies with `python -m pip install -r requirements.txt`."
+        )
+
+
+def _require_faker() -> Any:
+    if Faker is None:
+        raise RuntimeError(
+            "faker is required to generate simulator records. "
+            "Install dependencies with `python -m pip install -r requirements.txt`."
+        )
+    return Faker
 
 
 def _money(value: float | int | str | Decimal) -> Decimal:
@@ -384,6 +605,21 @@ def _float_env(name: str, default: float) -> float:
     except ValueError:
         LOGGER.warning("Invalid float for %s=%r; using default %s", name, value, default)
         return default
+
+
+def _bool_env(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "y", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "n", "off"}:
+        return False
+
+    LOGGER.warning("Invalid boolean for %s=%r; using default %s", name, value, default)
+    return default
 
 
 if __name__ == "__main__":

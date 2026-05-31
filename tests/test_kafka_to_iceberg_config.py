@@ -75,6 +75,12 @@ class KafkaToIcebergConfigTests(unittest.TestCase):
         self.assertEqual(config.table_state_ttl, "42 min")
         self.assertEqual(config.pii_hash_salt, job.JobConfig.pii_hash_salt)
 
+    def test_transaction_ddl_uses_authoritative_event_time_contract(self) -> None:
+        script = Path("streaming/jobs/kafka_to_iceberg.py").read_text(encoding="utf-8")
+
+        self.assertIn("event_time_epoch_us BIGINT NOT NULL", script)
+        self.assertNotIn("`timestamp` STRING", script)
+
 
 if __name__ == "__main__":
     unittest.main()

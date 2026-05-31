@@ -30,17 +30,8 @@
       "doc": "ISO 4217 currency code, for example USD or THB."
     },
     {
-      "name": "timestamp",
-      "type": "string",
-      "doc": "Transaction timestamp formatted as an ISO 8601 UTC string."
-    },
-    {
       "name": "event_time_epoch_us",
-      "type": [
-        "null",
-        "long"
-      ],
-      "default": null,
+      "type": "long",
       "doc": "Canonical UTC event timestamp as Unix epoch microseconds. Retains full subsecond precision for downstream lakehouse processing."
     },
     {

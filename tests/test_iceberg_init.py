@@ -16,6 +16,8 @@ class IcebergInitTests(unittest.TestCase):
         self.assertIn("CREATE TABLE IF NOT EXISTS iceberg.bronze.transactions", rendered)
         self.assertIn("CREATE TABLE IF NOT EXISTS iceberg.silver.transactions", rendered)
         self.assertIn("amount decimal(18, 2)", rendered)
+        self.assertIn("event_time_epoch_us bigint", rendered)
+        self.assertNotIn('"timestamp" varchar', rendered)
         self.assertIn("compression_codec = 'ZSTD'", rendered)
         self.assertIn("partitioning = ARRAY['year', 'month', 'day', 'hour']", rendered)
         self.assertIn("object_store_layout_enabled = true", rendered)
