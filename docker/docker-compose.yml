@@ -266,7 +266,7 @@ services:
     volumes:
       - minio_data:/data
     healthcheck:
-      test: [ "CMD-SHELL", "curl -fsS http://localhost:9000/minio/health/live >/dev/null" ]
+      test: [ "CMD-SHELL", "curl -fsS http://localhost:9000/minio/health/ready >/dev/null" ]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -284,8 +284,20 @@ services:
         condition: service_healthy
     environment:
       <<: *aws-env
-    entrypoint: >
-      /bin/sh -c 'mc alias set local http://minio:9000 "$$AWS_ACCESS_KEY_ID" "$$AWS_SECRET_ACCESS_KEY" && mc mb --ignore-existing local/warehouse && mc anonymous set none local/warehouse'
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        echo "Configuring mc alias..."
+        for i in $$(seq 1 30); do
+          mc alias set local http://minio:9000 "$$AWS_ACCESS_KEY_ID" "$$AWS_SECRET_ACCESS_KEY" && break
+          echo "mc alias set failed, retrying in 3s..."
+          sleep 3
+        done
+        echo "Creating bucket..."
+        mc mb --ignore-existing local/warehouse
+        echo "Setting bucket policy..."
+        mc anonymous set none local/warehouse
     networks:
       - fintech_network
 
