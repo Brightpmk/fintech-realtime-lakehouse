@@ -36,7 +36,7 @@ class JobConfig:
     source_topic: str = "financial.transactions"
     schema_registry_subject: str = "financial.transactions-value"
     consumer_group_id: str = "flink-kafka-to-iceberg-phase4"
-    startup_mode: str = "earliest-offset"
+    startup_mode: str = "group-offsets"
     iceberg_catalog_name: str = "iceberg"
     iceberg_rest_uri: str = "http://localhost:8181"
     iceberg_warehouse: str = "s3://warehouse/"
@@ -45,7 +45,7 @@ class JobConfig:
     s3_secret_access_key: str | None = None
     s3_region: str = "us-east-1"
     pii_hash_salt: str | None = None
-    dedup_window_minutes: int = 10
+    dedup_window_minutes: int = 1
     watermark_lateness_seconds: int = 20
     checkpoint_interval_ms: int = 30_000
     checkpoint_min_pause_ms: int = 10_000
@@ -193,7 +193,7 @@ def build_environments(
     table_env.get_config().set("table.exec.state.ttl", config.table_state_ttl)
     table_env.get_config().set("table.local-time-zone", "UTC")
     table_env.get_config().set("table.optimizer.reuse-source-enabled", "true")
-    table_env.get_config().set("table.optimizer.reuse-sub-plan-enabled", "true")
+    table_env.get_config().set("table.optimizer.reuse-sub-plan-enabled", "false")
 
     LOGGER.info(
         "Configured RocksDB state backend checkpoint_dir=%s rocksdb_local_dir=%s "
@@ -282,6 +282,7 @@ def register_kafka_source(
             'properties.bootstrap.servers' = {sql_literal(config.kafka_bootstrap_servers)},
             'properties.group.id' = {sql_literal(config.consumer_group_id)},
             'scan.startup.mode' = {sql_literal(config.startup_mode)},
+            'properties.auto.offset.reset' = 'earliest',
             'value.format' = 'avro-confluent',
             'value.avro-confluent.url' = {sql_literal(config.schema_registry_url)},
             'value.avro-confluent.subject' = {sql_literal(config.schema_registry_subject)}
