@@ -348,8 +348,6 @@ def register_iceberg_catalog_and_tables(
             'warehouse' = {sql_literal(config.iceberg_warehouse)},
             'io-impl' = 'org.apache.iceberg.aws.s3.S3FileIO',
             's3.endpoint' = {sql_literal(config.s3_endpoint)},
-            's3.access-key-id' = {sql_literal(config.s3_access_key_id)},
-            's3.secret-access-key' = {sql_literal(config.s3_secret_access_key)},
             's3.path-style-access' = 'true',
             's3.region' = {sql_literal(config.s3_region)}
         )
@@ -383,11 +381,13 @@ def register_iceberg_catalog_and_tables(
             'format-version' = '2',
             'write.format.default' = 'parquet',
             'write.parquet.compression-codec' = 'zstd',
-            'write.target-file-size-bytes' = '134217728',
+            'write.target-file-size-bytes' = '16777216',
             'write.distribution-mode' = 'range',
             'write.sort.order' = 'event_time ASC, transaction_id ASC',
             'write.metadata.delete-after-commit.enabled' = 'true',
-            'write.metadata.previous-versions-max' = '20'
+            'write.metadata.previous-versions-max' = '20',
+            'write.object-storage.enabled' = 'true',
+            'write.object-storage.path' = 's3://warehouse/data'
         )
         """
     )
@@ -417,14 +417,16 @@ def register_iceberg_catalog_and_tables(
             'format-version' = '2',
             'write.format.default' = 'parquet',
             'write.parquet.compression-codec' = 'zstd',
-            'write.target-file-size-bytes' = '134217728',
+            'write.target-file-size-bytes' = '16777216',
             'write.distribution-mode' = 'range',
             'write.sort.order' = 'event_time ASC, transaction_id ASC',
             'write.metadata.delete-after-commit.enabled' = 'true',
             'write.metadata.previous-versions-max' = '20',
             'write.upsert.enabled' = 'true',
             'write.merge.mode' = 'copy-on-write',
-            'write.equality-delete.sort-order' = 'transaction_id ASC'
+            'write.equality-delete.sort-order' = 'transaction_id ASC',
+            'write.object-storage.enabled' = 'true',
+            'write.object-storage.path' = 's3://warehouse/data'
         )
         """
     )
@@ -448,9 +450,11 @@ def register_iceberg_catalog_and_tables(
             'format-version' = '2',
             'write.format.default' = 'parquet',
             'write.parquet.compression-codec' = 'zstd',
-            'write.target-file-size-bytes' = '134217728',
+            'write.target-file-size-bytes' = '16777216',
             'write.metadata.delete-after-commit.enabled' = 'true',
-            'write.metadata.previous-versions-max' = '20'
+            'write.metadata.previous-versions-max' = '20',
+            'write.object-storage.enabled' = 'true',
+            'write.object-storage.path' = 's3://warehouse/data'
         )
         """
     )
@@ -484,10 +488,10 @@ def submit_medallion_inserts(
                 ELSE CAST(event_time AS TIMESTAMP(6)) 
             END AS event_time,
             CAST(CURRENT_TIMESTAMP AS TIMESTAMP(6)) AS ingest_time,
-            CAST(EXTRACT(YEAR FROM event_time) AS INT) AS `year`,
-            CAST(EXTRACT(MONTH FROM event_time) AS INT) AS `month`,
-            CAST(EXTRACT(DAY FROM event_time) AS INT) AS `day`,
-            CAST(EXTRACT(HOUR FROM event_time) AS INT) AS `hour`
+            CAST(EXTRACT(YEAR FROM COALESCE(event_time, CURRENT_TIMESTAMP)) AS INT) AS `year`,
+            CAST(EXTRACT(MONTH FROM COALESCE(event_time, CURRENT_TIMESTAMP)) AS INT) AS `month`,
+            CAST(EXTRACT(DAY FROM COALESCE(event_time, CURRENT_TIMESTAMP)) AS INT) AS `day`,
+            CAST(EXTRACT(HOUR FROM COALESCE(event_time, CURRENT_TIMESTAMP)) AS INT) AS `hour`
         FROM financial_transactions_valid
         """
     )

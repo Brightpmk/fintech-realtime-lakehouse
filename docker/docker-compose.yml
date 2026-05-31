@@ -149,6 +149,8 @@ services:
         condition: service_healthy
       kafka3:
         condition: service_healthy
+      schema-registry:
+        condition: service_healthy
       minio-init:
         condition: service_completed_successfully
       iceberg-rest:
@@ -200,6 +202,10 @@ services:
     depends_on:
       flink-jobmanager:
         condition: service_healthy
+      schema-registry:
+        condition: service_healthy
+      iceberg-rest:
+        condition: service_healthy
     environment:
       <<: *aws-env
       FLINK_CHECKPOINT_DIR: s3://warehouse/flink-checkpoints/kafka-to-iceberg
@@ -217,6 +223,9 @@ services:
         jobmanager.rpc.address: flink-jobmanager
         taskmanager.numberOfTaskSlots: 4
         parallelism.default: 2
+        state.backend.type: rocksdb
+        state.backend.incremental: true
+        state.backend.rocksdb.memory.managed: true
         classloader.parent-first-patterns.additional: com.codahale.metrics.
         s3.endpoint: http://minio:9000
         s3.path.style.access: true
@@ -385,11 +394,11 @@ services:
       TRINO_STATEMENT_URL: http://trino:8080/v1/statement
       TRINO_USER: ${TRINO_USER:-admin}
       ICEBERG_MAINTENANCE_TABLES: iceberg.bronze.transactions,iceberg.silver.transactions,iceberg.gold.gold_hourly_liquidity,iceberg.gold.gold_fraud_alerts
-      ICEBERG_MAINTENANCE_FILE_SIZE_THRESHOLD: 64MB
+      ICEBERG_MAINTENANCE_FILE_SIZE_THRESHOLD: 32MB
       ICEBERG_MAINTENANCE_RETENTION_THRESHOLD: 7d
       ICEBERG_MAINTENANCE_RETAIN_LAST: 10
       ICEBERG_MAINTENANCE_LOOP: "false"
-      ICEBERG_MAINTENANCE_INTERVAL_SECONDS: 21600
+      ICEBERG_MAINTENANCE_INTERVAL_SECONDS: 3600
     volumes:
       - ..:/workspace
     entrypoint: [ "python", "storage/iceberg_maintenance.py" ]
