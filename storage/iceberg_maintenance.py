@@ -60,6 +60,9 @@ def run_table_maintenance(client: TrinoClient, table_name: str) -> None:
     retention_threshold = validate_duration_threshold(
         os.getenv("ICEBERG_MAINTENANCE_RETENTION_THRESHOLD", "7d")
     )
+    orphan_retention_threshold = validate_duration_threshold(
+        os.getenv("ICEBERG_MAINTENANCE_ORPHAN_RETENTION_THRESHOLD", "3d")
+    )
     retain_last = max(1, _int_env("ICEBERG_MAINTENANCE_RETAIN_LAST", 10))
 
     statements = [
@@ -69,7 +72,7 @@ def run_table_maintenance(client: TrinoClient, table_name: str) -> None:
             f"ALTER TABLE {table_name} EXECUTE expire_snapshots("
             f"retention_threshold => '{retention_threshold}', retain_last => {retain_last})"
         ),
-        f"ALTER TABLE {table_name} EXECUTE remove_orphan_files(retention_threshold => '{retention_threshold}')",
+        f"ALTER TABLE {table_name} EXECUTE remove_orphan_files(retention_threshold => '{orphan_retention_threshold}')",
     ]
 
     LOGGER.info("Starting Iceberg maintenance for %s", table_name)

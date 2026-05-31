@@ -60,6 +60,9 @@ class KafkaToIcebergConfigTests(unittest.TestCase):
             "FLINK_CHECKPOINT_INTERVAL_MS": "100",
             "FLINK_CHECKPOINT_TIMEOUT_MS": "100",
             "FLINK_TABLE_STATE_TTL": "42 min",
+            "AWS_ACCESS_KEY_ID": "test-key",
+            "AWS_SECRET_ACCESS_KEY": "test-secret",
+            "PII_HASH_SALT": "test-salt",
         }
 
         with patch.dict(os.environ, env, clear=True):
@@ -73,7 +76,9 @@ class KafkaToIcebergConfigTests(unittest.TestCase):
         self.assertEqual(config.checkpoint_interval_ms, 1_000)
         self.assertEqual(config.checkpoint_timeout_ms, 10_000)
         self.assertEqual(config.table_state_ttl, "42 min")
-        self.assertEqual(config.pii_hash_salt, job.JobConfig.pii_hash_salt)
+        self.assertEqual(config.s3_access_key_id, "test-key")
+        self.assertEqual(config.s3_secret_access_key, "test-secret")
+        self.assertEqual(config.pii_hash_salt, "test-salt")
 
     def test_transaction_ddl_uses_authoritative_event_time_contract(self) -> None:
         script = Path("streaming/jobs/kafka_to_iceberg.py").read_text(encoding="utf-8")

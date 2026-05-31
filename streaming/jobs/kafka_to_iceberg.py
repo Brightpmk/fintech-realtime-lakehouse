@@ -41,10 +41,10 @@ class JobConfig:
     iceberg_rest_uri: str = "http://localhost:8181"
     iceberg_warehouse: str = "s3://warehouse/"
     s3_endpoint: str = "http://localhost:9000"
-    s3_access_key_id: str = "admin"
-    s3_secret_access_key: str = "password"
+    s3_access_key_id: str | None = None
+    s3_secret_access_key: str | None = None
     s3_region: str = "us-east-1"
-    pii_hash_salt: str = "local-dev-pii-salt-change-me"
+    pii_hash_salt: str | None = None
     dedup_window_minutes: int = 10
     watermark_lateness_seconds: int = 20
     checkpoint_interval_ms: int = 30_000
@@ -73,6 +73,17 @@ class JobConfig:
             watermark_lateness_seconds // 60
         ) + 2
 
+        s3_access_key_id = os.getenv("AWS_ACCESS_KEY_ID")
+        s3_secret_access_key = os.getenv("AWS_SECRET_ACCESS_KEY")
+        pii_hash_salt = os.getenv("PII_HASH_SALT")
+
+        if not s3_access_key_id:
+            raise ValueError("AWS_ACCESS_KEY_ID environment variable is required")
+        if not s3_secret_access_key:
+            raise ValueError("AWS_SECRET_ACCESS_KEY environment variable is required")
+        if not pii_hash_salt:
+            raise ValueError("PII_HASH_SALT environment variable is required")
+
         return cls(
             kafka_bootstrap_servers=os.getenv(
                 "KAFKA_BOOTSTRAP_SERVERS", cls.kafka_bootstrap_servers
@@ -95,12 +106,10 @@ class JobConfig:
                 "S3_ENDPOINT",
                 os.getenv("MINIO_ENDPOINT", cls.s3_endpoint),
             ),
-            s3_access_key_id=os.getenv("AWS_ACCESS_KEY_ID", cls.s3_access_key_id),
-            s3_secret_access_key=os.getenv(
-                "AWS_SECRET_ACCESS_KEY", cls.s3_secret_access_key
-            ),
+            s3_access_key_id=s3_access_key_id,
+            s3_secret_access_key=s3_secret_access_key,
             s3_region=os.getenv("AWS_REGION", cls.s3_region),
-            pii_hash_salt=os.getenv("PII_HASH_SALT", cls.pii_hash_salt),
+            pii_hash_salt=pii_hash_salt,
             dedup_window_minutes=dedup_window_minutes,
             watermark_lateness_seconds=watermark_lateness_seconds,
             checkpoint_interval_ms=max(
@@ -149,11 +158,6 @@ def main() -> None:
         config.s3_endpoint,
         config.consumer_group_id,
     )
-    if config.pii_hash_salt == JobConfig.pii_hash_salt:
-        LOGGER.warning(
-            "Using the local development PII hash salt. Set PII_HASH_SALT for "
-            "shared environments."
-        )
 
     _, table_env = build_environments(config)
     register_kafka_source(table_env, config)
