@@ -167,7 +167,6 @@ def build_environments(
 
     try:
         from pyflink.datastream import StreamExecutionEnvironment
-        from pyflink.datastream.checkpointing_mode import CheckpointingMode
         from pyflink.table import EnvironmentSettings, StreamTableEnvironment
     except ImportError as exc:
         raise RuntimeError(
@@ -178,15 +177,6 @@ def build_environments(
     flink_config = build_flink_configuration(config)
     env = StreamExecutionEnvironment.get_execution_environment(flink_config)
     env.set_parallelism(config.parallelism)
-    env.enable_checkpointing(
-        config.checkpoint_interval_ms,
-        CheckpointingMode.EXACTLY_ONCE,
-    )
-
-    checkpoint_config = env.get_checkpoint_config()
-    checkpoint_config.set_checkpoint_timeout(config.checkpoint_timeout_ms)
-    checkpoint_config.set_min_pause_between_checkpoints(config.checkpoint_min_pause_ms)
-    checkpoint_config.set_max_concurrent_checkpoints(1)
 
     settings = (
         EnvironmentSettings.new_instance()
@@ -233,6 +223,7 @@ def build_flink_configuration(config: JobConfig) -> "Configuration":
     flink_config.set_string(
         "execution.checkpointing.timeout", f"{config.checkpoint_timeout_ms} ms"
     )
+    flink_config.set_string("execution.checkpointing.max-concurrent-checkpoints", "1")
     flink_config.set_string("state.backend.type", "rocksdb")
     flink_config.set_string("state.backend.incremental", "true")
     flink_config.set_string("state.backend.rocksdb.memory.managed", "true")

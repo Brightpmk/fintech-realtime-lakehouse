@@ -81,6 +81,29 @@ class KafkaToIcebergConfigTests(unittest.TestCase):
         self.assertIn("event_time_epoch_us BIGINT NOT NULL", script)
         self.assertNotIn("`timestamp` STRING", script)
 
+    def test_checkpoint_configuration_has_single_authority(self) -> None:
+        script = Path("streaming/jobs/kafka_to_iceberg.py").read_text(encoding="utf-8")
+        build_environments_source = script[
+            script.index("def build_environments") : script.index(
+                "def build_flink_configuration"
+            )
+        ]
+        build_configuration_source = script[
+            script.index("def build_flink_configuration") : script.index(
+                "def register_kafka_source"
+            )
+        ]
+
+        self.assertNotIn("enable_checkpointing", build_environments_source)
+        self.assertNotIn("get_checkpoint_config", build_environments_source)
+        self.assertIn("execution.checkpointing.interval", build_configuration_source)
+        self.assertIn("execution.checkpointing.min-pause", build_configuration_source)
+        self.assertIn("execution.checkpointing.timeout", build_configuration_source)
+        self.assertIn(
+            "execution.checkpointing.max-concurrent-checkpoints",
+            build_configuration_source,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
