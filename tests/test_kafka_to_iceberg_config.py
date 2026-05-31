@@ -60,6 +60,7 @@ class KafkaToIcebergConfigTests(unittest.TestCase):
             "FLINK_CHECKPOINT_INTERVAL_MS": "100",
             "FLINK_CHECKPOINT_TIMEOUT_MS": "100",
             "FLINK_TABLE_STATE_TTL": "42 min",
+            "FLINK_SOURCE_IDLE_TIMEOUT": "15 s",
             "AWS_ACCESS_KEY_ID": "test-key",
             "AWS_SECRET_ACCESS_KEY": "test-secret",
             "PII_HASH_SALT": "test-salt",
@@ -77,6 +78,7 @@ class KafkaToIcebergConfigTests(unittest.TestCase):
         self.assertEqual(config.checkpoint_interval_ms, 1_000)
         self.assertEqual(config.checkpoint_timeout_ms, 10_000)
         self.assertEqual(config.table_state_ttl, "42 min")
+        self.assertEqual(config.source_idle_timeout, "15 s")
         self.assertEqual(config.s3_access_key_id, "test-key")
         self.assertEqual(config.s3_secret_access_key, "test-secret")
         self.assertEqual(config.pii_hash_salt, "test-salt")
@@ -191,6 +193,17 @@ class KafkaToIcebergConfigTests(unittest.TestCase):
             "execution.checkpointing.max-concurrent-checkpoints",
             build_configuration_source,
         )
+
+    def test_source_idle_timeout_prevents_idle_partitions_blocking_watermarks(self) -> None:
+        script = Path("streaming/jobs/kafka_to_iceberg.py").read_text(encoding="utf-8")
+        build_environments_source = script[
+            script.index("def build_environments") : script.index(
+                "def build_flink_configuration"
+            )
+        ]
+
+        self.assertIn("table.exec.source.idle-timeout", build_environments_source)
+        self.assertIn("config.source_idle_timeout", build_environments_source)
 
 
 if __name__ == "__main__":

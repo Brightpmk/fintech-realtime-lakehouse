@@ -56,6 +56,7 @@ class JobConfig:
     parallelism: int = 2
     pipeline_jars: str | None = None
     table_state_ttl: str = "12 min"
+    source_idle_timeout: str = "30 s"
     wait_for_job: bool = False
     log_level: str = "INFO"
 
@@ -141,6 +142,9 @@ class JobConfig:
             table_state_ttl=os.getenv(
                 "FLINK_TABLE_STATE_TTL", f"{default_state_ttl_minutes} min"
             ),
+            source_idle_timeout=os.getenv(
+                "FLINK_SOURCE_IDLE_TIMEOUT", cls.source_idle_timeout
+            ),
             wait_for_job=_bool_env("FLINK_WAIT_FOR_JOB", cls.wait_for_job),
             log_level=os.getenv("LOG_LEVEL", cls.log_level),
         )
@@ -196,17 +200,21 @@ def build_environments(
     )
     table_env = StreamTableEnvironment.create(env, environment_settings=settings)
     table_env.get_config().set("table.exec.state.ttl", config.table_state_ttl)
+    table_env.get_config().set(
+        "table.exec.source.idle-timeout", config.source_idle_timeout
+    )
     table_env.get_config().set("table.local-time-zone", "UTC")
     table_env.get_config().set("table.optimizer.reuse-source-enabled", "true")
     table_env.get_config().set("table.optimizer.reuse-sub-plan-enabled", "true")
 
     LOGGER.info(
         "Configured RocksDB state backend checkpoint_dir=%s rocksdb_local_dir=%s "
-        "checkpoint_interval_ms=%s table_state_ttl=%s",
+        "checkpoint_interval_ms=%s table_state_ttl=%s source_idle_timeout=%s",
         config.checkpoint_dir,
         config.rocksdb_local_dir,
         config.checkpoint_interval_ms,
         config.table_state_ttl,
+        config.source_idle_timeout,
     )
     return env, table_env
 
