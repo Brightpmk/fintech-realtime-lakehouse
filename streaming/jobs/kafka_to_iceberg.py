@@ -47,7 +47,7 @@ class JobConfig:
     pii_hash_salt: str | None = None
     dedup_window_minutes: int = 1
     watermark_lateness_seconds: int = 20
-    checkpoint_interval_ms: int = 30_000
+    checkpoint_interval_ms: int = 300_000
     checkpoint_min_pause_ms: int = 10_000
     checkpoint_timeout_ms: int = 120_000
     checkpoint_dir: str = "s3://warehouse/flink-checkpoints/kafka-to-iceberg"

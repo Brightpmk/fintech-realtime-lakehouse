@@ -158,6 +158,7 @@ services:
     environment:
       <<: *aws-env
       FLINK_CHECKPOINT_DIR: s3://warehouse/flink-checkpoints/kafka-to-iceberg
+      FLINK_CHECKPOINT_INTERVAL_MS: 300000
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092,kafka2:29092,kafka3:29092
       SCHEMA_REGISTRY_URL: http://schema-registry:8081
       ICEBERG_REST_URI: http://iceberg-rest:8181
@@ -173,7 +174,6 @@ services:
         rest.address: flink-jobmanager
         parallelism.default: 2
         state.backend.type: rocksdb
-        execution.checkpointing.interval: 30s
         classloader.parent-first-patterns.additional: com.codahale.metrics.
         s3.endpoint: http://minio:9000
         s3.path.style.access: true
@@ -203,6 +203,7 @@ services:
     environment:
       <<: *aws-env
       FLINK_CHECKPOINT_DIR: s3://warehouse/flink-checkpoints/kafka-to-iceberg
+      FLINK_CHECKPOINT_INTERVAL_MS: 300000
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092,kafka2:29092,kafka3:29092
       SCHEMA_REGISTRY_URL: http://schema-registry:8081
       ICEBERG_REST_URI: http://iceberg-rest:8181
