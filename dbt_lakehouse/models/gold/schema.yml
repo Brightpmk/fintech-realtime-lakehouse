@@ -25,8 +25,7 @@ sources:
             tests:
               - not_null
               - accepted_values:
-                  arguments:
-                    values: ["USD", "THB", "EUR", "SGD", "JPY"]
+                  values: ["USD", "THB", "EUR", "SGD", "JPY"]
           - name: account_id
             tests:
               - not_null
@@ -62,8 +61,7 @@ models:
         tests:
           - not_null
           - accepted_values:
-              arguments:
-                values: ["USD", "THB", "EUR", "SGD", "JPY"]
+              values: ["USD", "THB", "EUR", "SGD", "JPY"]
       - name: transaction_count
         tests:
           - not_null
@@ -110,13 +108,12 @@ models:
         tests:
           - not_null
           - accepted_values:
-              arguments:
-                values:
-                  - SIMULATOR_FLAG
-                  - HIGH_AMOUNT_HIGH_RISK_LOCATION
-                  - HIGH_AMOUNT
-                  - ELEVATED_AMOUNT_HIGH_RISK_LOCATION
-                  - RISK_RULE_MATCH
+              values:
+                - SIMULATOR_FLAG
+                - HIGH_AMOUNT_HIGH_RISK_LOCATION
+                - HIGH_AMOUNT
+                - ELEVATED_AMOUNT_HIGH_RISK_LOCATION
+                - RISK_RULE_MATCH
       - name: amount
         tests:
           - not_null

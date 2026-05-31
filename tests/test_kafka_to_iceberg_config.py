@@ -60,6 +60,11 @@ class KafkaToIcebergConfigTests(unittest.TestCase):
             "FLINK_CHECKPOINT_INTERVAL_MS": "100",
             "FLINK_CHECKPOINT_TIMEOUT_MS": "100",
             "FLINK_TABLE_STATE_TTL": "42 min",
+            "FLINK_SOURCE_IDLE_TIMEOUT": "15 s",
+            "AWS_ACCESS_KEY_ID": "test-key",
+            "AWS_SECRET_ACCESS_KEY": "test-secret",
+            "PII_HASH_SALT": "0123456789abcdef0123456789abcdef",
+            "FLINK_WAIT_FOR_JOB": "true",
         }
 
         with patch.dict(os.environ, env, clear=True):
@@ -73,7 +78,140 @@ class KafkaToIcebergConfigTests(unittest.TestCase):
         self.assertEqual(config.checkpoint_interval_ms, 1_000)
         self.assertEqual(config.checkpoint_timeout_ms, 10_000)
         self.assertEqual(config.table_state_ttl, "42 min")
-        self.assertEqual(config.pii_hash_salt, job.JobConfig.pii_hash_salt)
+        self.assertEqual(config.source_idle_timeout, "15 s")
+        self.assertEqual(config.s3_access_key_id, "test-key")
+        self.assertEqual(config.s3_secret_access_key, "test-secret")
+        self.assertEqual(config.pii_hash_salt, "0123456789abcdef0123456789abcdef")
+        self.assertTrue(config.wait_for_job)
+
+    def test_default_state_ttl_calculation(self) -> None:
+        env = {
+            "DEDUP_WINDOW_MINUTES": "1",
+            "WATERMARK_LATENESS_SECONDS": "20",
+            "AWS_ACCESS_KEY_ID": "test-key",
+            "AWS_SECRET_ACCESS_KEY": "test-secret",
+            "PII_HASH_SALT": "0123456789abcdef0123456789abcdef",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            config = job.JobConfig.from_env()
+        self.assertEqual(config.table_state_ttl, "7 min")
+
+    def test_pii_hash_salt_validation(self) -> None:
+        base_env = {
+            "AWS_ACCESS_KEY_ID": "test-key",
+            "AWS_SECRET_ACCESS_KEY": "test-secret",
+        }
+
+        # Test missing PII_HASH_SALT
+        with patch.dict(os.environ, base_env, clear=True):
+            with self.assertRaisesRegex(ValueError, "PII_HASH_SALT environment variable is required"):
+                job.JobConfig.from_env()
+
+        # Test too short PII_HASH_SALT
+        env_short = {**base_env, "PII_HASH_SALT": "0123456789abcdef0123456789abcde"}
+        with patch.dict(os.environ, env_short, clear=True):
+            with self.assertRaisesRegex(ValueError, "PII_HASH_SALT must be at least 32 hex characters"):
+                job.JobConfig.from_env()
+
+        # Test non-hex characters (even if length is sufficient)
+        env_non_hex = {**base_env, "PII_HASH_SALT": "0123456789abcdef0123456789abcdeg"}
+        with patch.dict(os.environ, env_non_hex, clear=True):
+            with self.assertRaisesRegex(ValueError, "PII_HASH_SALT must be at least 32 hex characters"):
+                job.JobConfig.from_env()
+
+        # Test valid hex salt (exactly 32 chars)
+        env_valid = {**base_env, "PII_HASH_SALT": "0123456789abcdef0123456789abcdef"}
+        with patch.dict(os.environ, env_valid, clear=True):
+            config = job.JobConfig.from_env()
+            self.assertEqual(config.pii_hash_salt, "0123456789abcdef0123456789abcdef")
+
+    def test_transaction_ddl_uses_authoritative_event_time_contract(self) -> None:
+        script = Path("streaming/jobs/kafka_to_iceberg.py").read_text(encoding="utf-8")
+        kafka_source_source = script[
+            script.index("CREATE TABLE financial_transactions_raw") : script.index(
+                "CREATE TEMPORARY VIEW financial_transactions_valid"
+            )
+        ]
+
+        self.assertIn("event_time_epoch_us BIGINT,", kafka_source_source)
+        self.assertIn("TO_TIMESTAMP_LTZ(", kafka_source_source)
+        self.assertIn("CAST(FLOOR(event_time_epoch_us / 1000) AS BIGINT)", kafka_source_source)
+        self.assertIn(",\n                        3", kafka_source_source)
+        self.assertNotIn("TO_TIMESTAMP_LTZ(event_time_epoch_us, 6)", kafka_source_source)
+        self.assertNotIn("`timestamp` STRING", script)
+
+    def test_invalid_events_are_routed_to_rejected_bronze_table(self) -> None:
+        script = Path("streaming/jobs/kafka_to_iceberg.py").read_text(encoding="utf-8")
+        insert_source = script[
+            script.index("def submit_medallion_inserts") : script.index(
+                "def configure_logging"
+            )
+        ]
+
+        self.assertIn("CREATE TEMPORARY VIEW financial_transactions_invalid", script)
+        self.assertIn("MISSING_EVENT_TIME_EPOCH_US", script)
+        self.assertIn("bronze.transactions_rejected", script)
+        self.assertIn("FROM financial_transactions_valid", insert_source)
+        self.assertIn("FROM financial_transactions_invalid", insert_source)
+        self.assertNotIn("FROM financial_transactions_raw", insert_source)
+
+    def test_silver_dedup_uses_append_only_window_aggregate(self) -> None:
+        script = Path("streaming/jobs/kafka_to_iceberg.py").read_text(encoding="utf-8")
+        insert_start = script.index("INSERT INTO {catalog_name}.silver.transactions")
+        insert_source = script[insert_start : script.index("LOGGER.info(", insert_start)]
+
+        self.assertIn("GROUP BY window_start, window_end, transaction_id", insert_source)
+        self.assertIn("MIN(event_time_epoch_us) AS event_time_epoch_us", insert_source)
+        self.assertIn("MIN(account_id) AS account_id", insert_source)
+        self.assertNotIn("ROW_NUMBER()", insert_source)
+        self.assertNotIn("rownum", insert_source)
+
+    def test_detached_submission_does_not_wait_by_default(self) -> None:
+        script = Path("streaming/jobs/kafka_to_iceberg.py").read_text(encoding="utf-8")
+        submit_source = script[
+            script.index("def submit_medallion_inserts") : script.index(
+                "def configure_logging"
+            )
+        ]
+
+        self.assertIn("table_result = statement_set.execute()", submit_source)
+        self.assertIn("if config.wait_for_job:", submit_source)
+        self.assertIn("table_result.wait()", submit_source)
+        self.assertNotIn("statement_set.execute().wait()", submit_source)
+
+    def test_checkpoint_configuration_has_single_authority(self) -> None:
+        script = Path("streaming/jobs/kafka_to_iceberg.py").read_text(encoding="utf-8")
+        build_environments_source = script[
+            script.index("def build_environments") : script.index(
+                "def build_flink_configuration"
+            )
+        ]
+        build_configuration_source = script[
+            script.index("def build_flink_configuration") : script.index(
+                "def register_kafka_source"
+            )
+        ]
+
+        self.assertNotIn("enable_checkpointing", build_environments_source)
+        self.assertNotIn("get_checkpoint_config", build_environments_source)
+        self.assertIn("execution.checkpointing.interval", build_configuration_source)
+        self.assertIn("execution.checkpointing.min-pause", build_configuration_source)
+        self.assertIn("execution.checkpointing.timeout", build_configuration_source)
+        self.assertIn(
+            "execution.checkpointing.max-concurrent-checkpoints",
+            build_configuration_source,
+        )
+
+    def test_source_idle_timeout_prevents_idle_partitions_blocking_watermarks(self) -> None:
+        script = Path("streaming/jobs/kafka_to_iceberg.py").read_text(encoding="utf-8")
+        build_environments_source = script[
+            script.index("def build_environments") : script.index(
+                "def build_flink_configuration"
+            )
+        ]
+
+        self.assertIn("table.exec.source.idle-timeout", build_environments_source)
+        self.assertIn("config.source_idle_timeout", build_environments_source)
 
 
 if __name__ == "__main__":

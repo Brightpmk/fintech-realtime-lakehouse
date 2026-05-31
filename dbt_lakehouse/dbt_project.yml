@@ -7,19 +7,10 @@ profile: fintech_realtime_lakehouse
 model-paths: ["models"]
 macro-paths: ["macros"]
 test-paths: ["tests"]
-analysis-paths: ["analyses"]
-seed-paths: ["seeds"]
-snapshot-paths: ["snapshots"]
 
 target-path: target
 clean-targets:
   - target
   - dbt_packages
 
-models:
-  fintech_realtime_lakehouse:
-    gold:
-      +schema: gold
-      +materialized: incremental
-      +incremental_strategy: merge
-      +on_schema_change: sync_all_columns
+
