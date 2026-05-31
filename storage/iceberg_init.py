@@ -245,7 +245,11 @@ def build_init_statements(catalog: str) -> list[str]:
             max_commit_retry = 10,
             delete_after_commit_enabled = true,
             max_previous_versions = 20,
-            object_store_layout_enabled = true
+            object_store_layout_enabled = true,
+            extra_properties = MAP(
+                ARRAY['write.upsert.enabled', 'write.merge.mode', 'write.equality-delete.sort-order'],
+                ARRAY['true', 'copy-on-write', 'transaction_id ASC']
+            )
         )
         """,
         f"""

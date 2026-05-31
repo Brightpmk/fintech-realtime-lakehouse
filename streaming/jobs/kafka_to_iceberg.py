@@ -13,6 +13,7 @@ open lakehouse medallion layout on Iceberg:
 from __future__ import annotations
 
 import logging
+import math
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -69,9 +70,11 @@ class JobConfig:
             0,
             _int_env("WATERMARK_LATENESS_SECONDS", cls.watermark_lateness_seconds),
         )
-        default_state_ttl_minutes = dedup_window_minutes + (
-            watermark_lateness_seconds // 60
-        ) + 2
+        default_state_ttl_minutes = (
+            dedup_window_minutes
+            + math.ceil(watermark_lateness_seconds / 60)
+            + 5
+        )
 
         s3_access_key_id = os.getenv("AWS_ACCESS_KEY_ID")
         s3_secret_access_key = os.getenv("AWS_SECRET_ACCESS_KEY")
@@ -193,7 +196,7 @@ def build_environments(
     table_env.get_config().set("table.exec.state.ttl", config.table_state_ttl)
     table_env.get_config().set("table.local-time-zone", "UTC")
     table_env.get_config().set("table.optimizer.reuse-source-enabled", "true")
-    table_env.get_config().set("table.optimizer.reuse-sub-plan-enabled", "false")
+    table_env.get_config().set("table.optimizer.reuse-sub-plan-enabled", "true")
 
     LOGGER.info(
         "Configured RocksDB state backend checkpoint_dir=%s rocksdb_local_dir=%s "
@@ -268,6 +271,8 @@ def register_kafka_source(
             event_time AS (
                 CASE
                     WHEN event_time_epoch_us IS NULL THEN NULL
+                    WHEN event_time_epoch_us < 1000000000000000 THEN NULL
+                    WHEN event_time_epoch_us > 9999999999999999 THEN NULL
                     ELSE TO_TIMESTAMP_LTZ(event_time_epoch_us, 6)
                 END
             ),
@@ -416,7 +421,10 @@ def register_iceberg_catalog_and_tables(
             'write.distribution-mode' = 'range',
             'write.sort.order' = 'event_time ASC, transaction_id ASC',
             'write.metadata.delete-after-commit.enabled' = 'true',
-            'write.metadata.previous-versions-max' = '20'
+            'write.metadata.previous-versions-max' = '20',
+            'write.upsert.enabled' = 'true',
+            'write.merge.mode' = 'copy-on-write',
+            'write.equality-delete.sort-order' = 'transaction_id ASC'
         )
         """
     )

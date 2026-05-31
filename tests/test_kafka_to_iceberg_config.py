@@ -80,6 +80,18 @@ class KafkaToIcebergConfigTests(unittest.TestCase):
         self.assertEqual(config.s3_secret_access_key, "test-secret")
         self.assertEqual(config.pii_hash_salt, "test-salt")
 
+    def test_default_state_ttl_calculation(self) -> None:
+        env = {
+            "DEDUP_WINDOW_MINUTES": "1",
+            "WATERMARK_LATENESS_SECONDS": "20",
+            "AWS_ACCESS_KEY_ID": "test-key",
+            "AWS_SECRET_ACCESS_KEY": "test-secret",
+            "PII_HASH_SALT": "test-salt",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            config = job.JobConfig.from_env()
+        self.assertEqual(config.table_state_ttl, "7 min")
+
     def test_transaction_ddl_uses_authoritative_event_time_contract(self) -> None:
         script = Path("streaming/jobs/kafka_to_iceberg.py").read_text(encoding="utf-8")
         kafka_source_source = script[
