@@ -257,8 +257,8 @@ def register_kafka_source(
     table_env.execute_sql(
         f"""
         CREATE TABLE financial_transactions_raw (
-            transaction_id STRING,
-            account_id STRING,
+            transaction_id STRING NOT NULL,
+            account_id STRING NOT NULL,
             amount DECIMAL(18, 2),
             currency STRING,
             event_time_epoch_us BIGINT,
@@ -268,10 +268,7 @@ def register_kafka_source(
             event_time AS (
                 CASE
                     WHEN event_time_epoch_us IS NULL THEN NULL
-                    ELSE TO_TIMESTAMP_LTZ(
-                        CAST(FLOOR(event_time_epoch_us / 1000) AS BIGINT),
-                        3
-                    )
+                    ELSE TO_TIMESTAMP_LTZ(event_time_epoch_us, 6)
                 END
             ),
             WATERMARK FOR event_time AS

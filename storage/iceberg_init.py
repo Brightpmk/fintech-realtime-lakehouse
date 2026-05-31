@@ -190,16 +190,16 @@ def build_init_statements(catalog: str) -> list[str]:
         f"CREATE SCHEMA IF NOT EXISTS {catalog}.gold",
         f"""
         CREATE TABLE IF NOT EXISTS {catalog}.bronze.transactions (
-            transaction_id varchar,
-            account_id varchar,
+            transaction_id varchar NOT NULL,
+            account_id varchar NOT NULL,
             amount decimal(18, 2),
             currency varchar,
             event_time_epoch_us bigint,
             device_id varchar,
             location varchar,
             is_flagged_suspicious boolean,
-            event_time timestamp(3),
-            ingest_time timestamp(3),
+            event_time timestamp(6),
+            ingest_time timestamp(6),
             year integer,
             month integer,
             day integer,
@@ -219,18 +219,18 @@ def build_init_statements(catalog: str) -> list[str]:
         """,
         f"""
         CREATE TABLE IF NOT EXISTS {catalog}.silver.transactions (
-            transaction_id varchar,
-            account_id varchar,
+            transaction_id varchar NOT NULL,
+            account_id varchar NOT NULL,
             amount decimal(18, 2),
             currency varchar,
             event_time_epoch_us bigint,
             device_id varchar,
             location varchar,
             is_flagged_suspicious boolean,
-            event_time timestamp(3),
-            dedup_window_start timestamp(3),
-            dedup_window_end timestamp(3),
-            ingest_time timestamp(3),
+            event_time timestamp(6),
+            dedup_window_start timestamp(6),
+            dedup_window_end timestamp(6),
+            ingest_time timestamp(6),
             year integer,
             month integer,
             day integer,
@@ -258,9 +258,9 @@ def build_init_statements(catalog: str) -> list[str]:
             device_id varchar,
             location varchar,
             is_flagged_suspicious boolean,
-            event_time timestamp(3),
+            event_time timestamp(6),
             reject_reason varchar,
-            rejected_at timestamp(3)
+            rejected_at timestamp(6)
         )
         WITH (
             format = 'PARQUET',

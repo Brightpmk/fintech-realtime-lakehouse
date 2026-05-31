@@ -16,7 +16,7 @@ class DockerComposeConfigTests(unittest.TestCase):
         )
         self.assertIn("CATALOG_JDBC_USER: ${ICEBERG_CATALOG_DB_USER:-iceberg}", compose)
         self.assertIn(
-            "CATALOG_JDBC_PASSWORD: ${ICEBERG_CATALOG_DB_PASSWORD:-iceberg}",
+            "CATALOG_JDBC_PASSWORD: ${ICEBERG_CATALOG_DB_PASSWORD:?ICEBERG_CATALOG_DB_PASSWORD is required}",
             compose,
         )
         self.assertIn("iceberg_catalog_db:/var/lib/postgresql/data", compose)

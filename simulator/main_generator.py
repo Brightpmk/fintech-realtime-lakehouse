@@ -527,6 +527,10 @@ def validate_transaction_schema_contract(
             "event_time_epoch_us is authoritative"
         )
 
+    for field_name in ("transaction_id", "account_id"):
+        if fields[field_name].get("type") != "string":
+            raise ValueError(f"{field_name} must be a strictly non-nullable Avro string")
+
     if fields["event_time_epoch_us"].get("type") != "long":
         raise ValueError("event_time_epoch_us must be a non-null Avro long")
 

@@ -54,6 +54,28 @@ class TransactionContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "event_time_epoch_us"):
             main_generator.validate_transaction_schema_contract(schema, schema_path)
 
+    def test_schema_contract_rejects_nullable_transaction_id(self) -> None:
+        schema_path = Path("simulator/schemas/transaction.avsc")
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        for field in schema["fields"]:
+            if field["name"] == "transaction_id":
+                field["type"] = ["null", "string"]
+                field["default"] = None
+
+        with self.assertRaisesRegex(ValueError, "transaction_id"):
+            main_generator.validate_transaction_schema_contract(schema, schema_path)
+
+    def test_schema_contract_rejects_nullable_account_id(self) -> None:
+        schema_path = Path("simulator/schemas/transaction.avsc")
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        for field in schema["fields"]:
+            if field["name"] == "account_id":
+                field["type"] = ["null", "string"]
+                field["default"] = None
+
+        with self.assertRaisesRegex(ValueError, "account_id"):
+            main_generator.validate_transaction_schema_contract(schema, schema_path)
+
     def test_schema_contract_rejects_redundant_timestamp(self) -> None:
         schema_path = Path("simulator/schemas/transaction.avsc")
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
