@@ -1,12 +1,5 @@
 {% set lookback_hours = var('gold_incremental_lookback_hours', 48) %}
-{% set destination_partition_predicate %}
-    (
-        DBT_INTERNAL_DEST."year" * 1000000
-        + DBT_INTERNAL_DEST."month" * 10000
-        + DBT_INTERNAL_DEST."day" * 100
-        + DBT_INTERNAL_DEST."hour"
-    ) >= {{ lakehouse_cutoff_partition_hour_key(lookback_hours) }}
-{% endset %}
+{% set destination_partition_predicate = lakehouse_partition_hour_key('DBT_INTERNAL_DEST', '>=', lakehouse_cutoff_partition_hour_key(lookback_hours)) %}
 
 {{
     config(
@@ -53,13 +46,13 @@ with raw_silver as (
       and s."day" is not null
       and s."hour" is not null
       {% if var('gold_start_partition_key', none) is not none %}
-      and {{ lakehouse_partition_hour_key('s') }} >= {{ var('gold_start_partition_key') }}
+      and {{ lakehouse_partition_hour_key('s', '>=', var('gold_start_partition_key')) }}
       {% endif %}
       {% if var('gold_end_partition_key', none) is not none %}
-      and {{ lakehouse_partition_hour_key('s') }} <= {{ var('gold_end_partition_key') }}
+      and {{ lakehouse_partition_hour_key('s', '<=', var('gold_end_partition_key')) }}
       {% endif %}
       {% if is_incremental() %}
-      and {{ lakehouse_partition_hour_key('s') }} >= {{ lakehouse_cutoff_partition_hour_key(lookback_hours) }}
+      and {{ lakehouse_partition_hour_key('s', '>=', lakehouse_cutoff_partition_hour_key(lookback_hours)) }}
       {% endif %}
 ),
 
@@ -94,7 +87,7 @@ classified as (
 
 alerts as (
     select
-        concat(transaction_id, '|', cast(event_time_epoch_us as varchar)) as fraud_alert_key,
+        transaction_id as fraud_alert_key,
         transaction_id,
         account_id,
         device_id,

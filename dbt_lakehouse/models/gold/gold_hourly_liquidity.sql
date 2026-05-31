@@ -1,12 +1,5 @@
 {% set lookback_hours = var('gold_incremental_lookback_hours', 48) %}
-{% set destination_partition_predicate %}
-    (
-        DBT_INTERNAL_DEST."year" * 1000000
-        + DBT_INTERNAL_DEST."month" * 10000
-        + DBT_INTERNAL_DEST."day" * 100
-        + DBT_INTERNAL_DEST."hour"
-    ) >= {{ lakehouse_cutoff_partition_hour_key(lookback_hours) }}
-{% endset %}
+{% set destination_partition_predicate = lakehouse_partition_hour_key('DBT_INTERNAL_DEST', '>=', lakehouse_cutoff_partition_hour_key(lookback_hours)) %}
 
 {{
     config(
@@ -44,13 +37,13 @@ with silver_transactions as (
       and s."day" is not null
       and s."hour" is not null
       {% if var('gold_start_partition_key', none) is not none %}
-      and {{ lakehouse_partition_hour_key('s') }} >= {{ var('gold_start_partition_key') }}
+      and {{ lakehouse_partition_hour_key('s', '>=', var('gold_start_partition_key')) }}
       {% endif %}
       {% if var('gold_end_partition_key', none) is not none %}
-      and {{ lakehouse_partition_hour_key('s') }} <= {{ var('gold_end_partition_key') }}
+      and {{ lakehouse_partition_hour_key('s', '<=', var('gold_end_partition_key')) }}
       {% endif %}
       {% if is_incremental() %}
-      and {{ lakehouse_partition_hour_key('s') }} >= {{ lakehouse_cutoff_partition_hour_key(lookback_hours) }}
+      and {{ lakehouse_partition_hour_key('s', '>=', lakehouse_cutoff_partition_hour_key(lookback_hours)) }}
       {% endif %}
 ),
 
@@ -61,7 +54,7 @@ hourly_aggregates as (
         count(*) as transaction_count,
         count_if(is_flagged_suspicious) as suspicious_transaction_count,
         sum(amount) as total_amount,
-        sum(case when is_flagged_suspicious then cast(0.00 as decimal(18,2)) else amount end) as net_amount,
+        sum(case when not is_flagged_suspicious then amount else cast(0.00 as decimal(18,2)) end) as net_amount,
         year,
         month,
         day,
@@ -78,7 +71,7 @@ hourly_aggregates as (
 
 select
     concat(
-        cast(to_unixtime(cast(hour_bucket as timestamp(6) with time zone)) as varchar),
+        cast(cast(to_unixtime(cast(hour_bucket as timestamp(6) with time zone)) as bigint) as varchar),
         '|',
         currency
     ) as hourly_liquidity_key,

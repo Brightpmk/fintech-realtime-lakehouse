@@ -318,6 +318,7 @@ services:
       CATALOG_S3_PATH__STYLE__ACCESS: "true"
       CATALOG_S3_ACCESS__KEY__ID: ${AWS_ACCESS_KEY_ID:?AWS_ACCESS_KEY_ID is required}
       CATALOG_S3_SECRET__ACCESS__KEY: ${AWS_SECRET_ACCESS_KEY:?AWS_SECRET_ACCESS_KEY is required}
+      CATALOG_JDBC_INIT_RETRY: "10"
     healthcheck:
       test: [ "CMD-SHELL", "curl -fsS http://localhost:8181/v1/config >/dev/null" ]
       interval: 10s
@@ -348,6 +349,7 @@ services:
       TRINO_STATEMENT_URL: http://trino:8080/v1/statement
       TRINO_USER: ${TRINO_USER:-admin}
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      DBT_SILVER_WAIT_TIMEOUT_SECONDS: 1800
     volumes:
       - ..:/workspace
     entrypoint: [ "/bin/sh", "-lc" ]
@@ -355,24 +357,32 @@ services:
         - >
           python ../storage/iceberg_init.py &&
           python -c "
-          import urllib.request, json, sys, time
+          import urllib.request, json, sys, time, os
           url = 'http://trino:8080/v1/statement'
           user = 'admin'
+          timeout = int(os.environ.get('DBT_SILVER_WAIT_TIMEOUT_SECONDS', '1800'))
+          start_time = time.time()
           def post(q):
               req = urllib.request.Request(url, data=q.encode(), headers={'X-Trino-User': user, 'Content-Type': 'text/plain'})
-              return json.loads(urllib.request.urlopen(req).read())
+              return json.loads(urllib.request.urlopen(req, timeout=30).read())
           print('Waiting for Silver rows...', flush=True)
           while True:
-              r = post('SELECT count(*) FROM iceberg.silver.transactions')
-              uri = r.get('nextUri')
-              while uri:
-                  r = json.loads(urllib.request.urlopen(uri).read())
+              if time.time() - start_time > timeout:
+                  print(f'Timed out waiting for Silver rows after {timeout} seconds.', file=sys.stderr, flush=True)
+                  sys.exit(1)
+              try:
+                  r = post('SELECT count(*) FROM iceberg.silver.transactions')
                   uri = r.get('nextUri')
-              rows = (r.get('data') or [[0]])[0][0]
-              if rows and rows > 0:
-                  print(f'Silver ready: {rows} rows', flush=True)
-                  break
-              print(f'Silver not ready yet ({rows} rows), retrying in 15s...', flush=True)
+                  while uri:
+                      r = json.loads(urllib.request.urlopen(uri, timeout=30).read())
+                      uri = r.get('nextUri')
+                  rows = (r.get('data') or [[0]])[0][0]
+                  if rows and rows > 0:
+                      print(f'Silver ready: {rows} rows', flush=True)
+                      break
+                  print(f'Silver not ready yet ({rows} rows), retrying in 15s...', flush=True)
+              except Exception as e:
+                  print(f'Error querying Trino: {e}, retrying in 15s...', flush=True)
               time.sleep(15)
           " &&
           dbt debug --profiles-dir . &&

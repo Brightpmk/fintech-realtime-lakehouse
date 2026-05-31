@@ -7,9 +7,6 @@ profile: fintech_realtime_lakehouse
 model-paths: ["models"]
 macro-paths: ["macros"]
 test-paths: ["tests"]
-analysis-paths: ["analyses"]
-seed-paths: ["seeds"]
-snapshot-paths: ["snapshots"]
 
 target-path: target
 clean-targets:
