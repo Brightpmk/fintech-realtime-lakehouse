@@ -50,6 +50,16 @@ class DockerComposeConfigTests(unittest.TestCase):
         self.assertIn("flink-s3-fs-hadoop-*.jar", dockerfile)
         self.assertIn("/opt/flink/lib/", dockerfile)
 
+    def test_flink_has_connector_safe_metaspace_budget(self) -> None:
+        compose = Path("docker/docker-compose.yml").read_text(encoding="utf-8")
+
+        self.assertIn("jobmanager.memory.process.size: 1600m", compose)
+        self.assertIn("jobmanager.memory.jvm-metaspace.size: 256m", compose)
+        self.assertIn("taskmanager.memory.process.size: 2048m", compose)
+        self.assertIn("taskmanager.memory.jvm-metaspace.size: 512m", compose)
+        self.assertIn("taskmanager.memory.jvm-overhead.min: 256m", compose)
+        self.assertIn("taskmanager.memory.jvm-overhead.max: 512m", compose)
+
 
 if __name__ == "__main__":
     unittest.main()

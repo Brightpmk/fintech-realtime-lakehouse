@@ -63,6 +63,7 @@ class KafkaToIcebergConfigTests(unittest.TestCase):
             "AWS_ACCESS_KEY_ID": "test-key",
             "AWS_SECRET_ACCESS_KEY": "test-secret",
             "PII_HASH_SALT": "test-salt",
+            "FLINK_WAIT_FOR_JOB": "true",
         }
 
         with patch.dict(os.environ, env, clear=True):
@@ -79,6 +80,7 @@ class KafkaToIcebergConfigTests(unittest.TestCase):
         self.assertEqual(config.s3_access_key_id, "test-key")
         self.assertEqual(config.s3_secret_access_key, "test-secret")
         self.assertEqual(config.pii_hash_salt, "test-salt")
+        self.assertTrue(config.wait_for_job)
 
     def test_default_state_ttl_calculation(self) -> None:
         env = {
@@ -107,6 +109,10 @@ class KafkaToIcebergConfigTests(unittest.TestCase):
 
         self.assertIn("event_time_epoch_us BIGINT,", kafka_source_source)
         self.assertIn("event_time_epoch_us BIGINT NOT NULL", iceberg_tables_source)
+        self.assertIn("TO_TIMESTAMP_LTZ(", kafka_source_source)
+        self.assertIn("CAST(FLOOR(event_time_epoch_us / 1000) AS BIGINT)", kafka_source_source)
+        self.assertIn(",\n                        3", kafka_source_source)
+        self.assertNotIn("TO_TIMESTAMP_LTZ(event_time_epoch_us, 6)", kafka_source_source)
         self.assertNotIn("`timestamp` STRING", script)
 
     def test_invalid_events_are_routed_to_rejected_bronze_table(self) -> None:
@@ -123,6 +129,45 @@ class KafkaToIcebergConfigTests(unittest.TestCase):
         self.assertIn("FROM financial_transactions_valid", insert_source)
         self.assertIn("FROM financial_transactions_invalid", insert_source)
         self.assertNotIn("FROM financial_transactions_raw", insert_source)
+
+    def test_silver_dedup_uses_append_only_window_aggregate(self) -> None:
+        script = Path("streaming/jobs/kafka_to_iceberg.py").read_text(encoding="utf-8")
+        insert_start = script.index("INSERT INTO {catalog_name}.silver.transactions")
+        insert_source = script[insert_start : script.index("LOGGER.info(", insert_start)]
+
+        self.assertIn("GROUP BY window_start, window_end, transaction_id", insert_source)
+        self.assertIn("MIN(event_time_epoch_us) AS event_time_epoch_us", insert_source)
+        self.assertIn("MIN(account_id) AS account_id", insert_source)
+        self.assertNotIn("ROW_NUMBER()", insert_source)
+        self.assertNotIn("rownum", insert_source)
+
+    def test_silver_table_is_configured_for_append_only_writes(self) -> None:
+        script = Path("streaming/jobs/kafka_to_iceberg.py").read_text(encoding="utf-8")
+
+        self.assertIn("'write.upsert.enabled' = 'false'", script)
+        self.assertIn("ALTER TABLE {catalog_name}.silver.transactions SET", script)
+        self.assertNotIn("'write.upsert.enabled' = 'true'", script)
+        self.assertNotIn("'write.equality-delete.sort-order'", script)
+
+    def test_iceberg_tables_use_current_data_path_property(self) -> None:
+        script = Path("streaming/jobs/kafka_to_iceberg.py").read_text(encoding="utf-8")
+
+        self.assertIn("'write.data.path' = 's3://warehouse/data'", script)
+        self.assertIn("RESET (\n                'write.object-storage.path'", script)
+        self.assertNotIn("'write.object-storage.path' = 's3://warehouse/data'", script)
+
+    def test_detached_submission_does_not_wait_by_default(self) -> None:
+        script = Path("streaming/jobs/kafka_to_iceberg.py").read_text(encoding="utf-8")
+        submit_source = script[
+            script.index("def submit_medallion_inserts") : script.index(
+                "def configure_logging"
+            )
+        ]
+
+        self.assertIn("table_result = statement_set.execute()", submit_source)
+        self.assertIn("if config.wait_for_job:", submit_source)
+        self.assertIn("table_result.wait()", submit_source)
+        self.assertNotIn("statement_set.execute().wait()", submit_source)
 
     def test_checkpoint_configuration_has_single_authority(self) -> None:
         script = Path("streaming/jobs/kafka_to_iceberg.py").read_text(encoding="utf-8")

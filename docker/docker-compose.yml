@@ -175,6 +175,8 @@ services:
         rest.bind-address: 0.0.0.0
         rest.address: flink-jobmanager
         parallelism.default: 2
+        jobmanager.memory.process.size: 1600m
+        jobmanager.memory.jvm-metaspace.size: 256m
         state.backend.type: rocksdb
         classloader.parent-first-patterns.additional: com.codahale.metrics.
         s3.endpoint: http://minio:9000
@@ -223,6 +225,10 @@ services:
         jobmanager.rpc.address: flink-jobmanager
         taskmanager.numberOfTaskSlots: 4
         parallelism.default: 2
+        taskmanager.memory.process.size: 2048m
+        taskmanager.memory.jvm-metaspace.size: 512m
+        taskmanager.memory.jvm-overhead.min: 256m
+        taskmanager.memory.jvm-overhead.max: 512m
         state.backend.type: rocksdb
         state.backend.incremental: true
         state.backend.rocksdb.memory.managed: true

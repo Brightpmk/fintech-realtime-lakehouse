@@ -216,8 +216,8 @@ def build_init_statements(catalog: str) -> list[str]:
             max_previous_versions = 20,
             object_store_layout_enabled = true,
             extra_properties = MAP(
-                ARRAY['write.object-storage.enabled', 'write.object-storage.path'],
-                ARRAY['true', 's3://warehouse/data']
+                ARRAY['write.data.path'],
+                ARRAY['s3://warehouse/data']
             )
         )
         """,
@@ -251,8 +251,8 @@ def build_init_statements(catalog: str) -> list[str]:
             max_previous_versions = 20,
             object_store_layout_enabled = true,
             extra_properties = MAP(
-                ARRAY['write.upsert.enabled', 'write.merge.mode', 'write.equality-delete.sort-order', 'write.object-storage.enabled', 'write.object-storage.path'],
-                ARRAY['true', 'copy-on-write', 'transaction_id ASC', 'true', 's3://warehouse/data']
+                ARRAY['write.upsert.enabled', 'write.data.path'],
+                ARRAY['false', 's3://warehouse/data']
             )
         )
         """,
@@ -280,8 +280,8 @@ def build_init_statements(catalog: str) -> list[str]:
             max_previous_versions = 20,
             object_store_layout_enabled = true,
             extra_properties = MAP(
-                ARRAY['write.object-storage.enabled', 'write.object-storage.path'],
-                ARRAY['true', 's3://warehouse/data']
+                ARRAY['write.data.path'],
+                ARRAY['s3://warehouse/data']
             )
         )
         """,

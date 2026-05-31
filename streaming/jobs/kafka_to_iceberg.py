@@ -56,6 +56,7 @@ class JobConfig:
     parallelism: int = 2
     pipeline_jars: str | None = None
     table_state_ttl: str = "12 min"
+    wait_for_job: bool = False
     log_level: str = "INFO"
 
     @classmethod
@@ -140,6 +141,7 @@ class JobConfig:
             table_state_ttl=os.getenv(
                 "FLINK_TABLE_STATE_TTL", f"{default_state_ttl_minutes} min"
             ),
+            wait_for_job=_bool_env("FLINK_WAIT_FOR_JOB", cls.wait_for_job),
             log_level=os.getenv("LOG_LEVEL", cls.log_level),
         )
 
@@ -273,7 +275,10 @@ def register_kafka_source(
                     WHEN event_time_epoch_us IS NULL THEN NULL
                     WHEN event_time_epoch_us < 1000000000000000 THEN NULL
                     WHEN event_time_epoch_us > 9999999999999999 THEN NULL
-                    ELSE TO_TIMESTAMP_LTZ(event_time_epoch_us, 6)
+                    ELSE TO_TIMESTAMP_LTZ(
+                        CAST(FLOOR(event_time_epoch_us / 1000) AS BIGINT),
+                        3
+                    )
                 END
             ),
             WATERMARK FOR event_time AS
@@ -387,7 +392,7 @@ def register_iceberg_catalog_and_tables(
             'write.metadata.delete-after-commit.enabled' = 'true',
             'write.metadata.previous-versions-max' = '20',
             'write.object-storage.enabled' = 'true',
-            'write.object-storage.path' = 's3://warehouse/data'
+            'write.data.path' = 's3://warehouse/data'
         )
         """
     )
@@ -422,11 +427,9 @@ def register_iceberg_catalog_and_tables(
             'write.sort.order' = 'event_time ASC, transaction_id ASC',
             'write.metadata.delete-after-commit.enabled' = 'true',
             'write.metadata.previous-versions-max' = '20',
-            'write.upsert.enabled' = 'true',
-            'write.merge.mode' = 'copy-on-write',
-            'write.equality-delete.sort-order' = 'transaction_id ASC',
+            'write.upsert.enabled' = 'false',
             'write.object-storage.enabled' = 'true',
-            'write.object-storage.path' = 's3://warehouse/data'
+            'write.data.path' = 's3://warehouse/data'
         )
         """
     )
@@ -454,12 +457,49 @@ def register_iceberg_catalog_and_tables(
             'write.metadata.delete-after-commit.enabled' = 'true',
             'write.metadata.previous-versions-max' = '20',
             'write.object-storage.enabled' = 'true',
-            'write.object-storage.path' = 's3://warehouse/data'
+            'write.data.path' = 's3://warehouse/data'
         )
         """
     )
 
+    apply_iceberg_table_property_migrations(table_env, catalog_name)
+
     LOGGER.info("Registered Iceberg catalog and Bronze/Silver/rejected tables")
+
+
+def apply_iceberg_table_property_migrations(
+    table_env: "StreamTableEnvironment",
+    catalog_name: str,
+) -> None:
+    """Normalize table properties that must be safe for append-only streaming."""
+
+    for table_name in (
+        "bronze.transactions",
+        "silver.transactions",
+        "bronze.transactions_rejected",
+    ):
+        table_env.execute_sql(
+            f"""
+            ALTER TABLE {catalog_name}.{table_name} RESET (
+                'write.object-storage.path'
+            )
+            """
+        )
+        table_env.execute_sql(
+            f"""
+            ALTER TABLE {catalog_name}.{table_name} SET (
+                'write.data.path' = 's3://warehouse/data'
+            )
+            """
+        )
+
+    table_env.execute_sql(
+        f"""
+        ALTER TABLE {catalog_name}.silver.transactions SET (
+            'write.upsert.enabled' = 'false'
+        )
+        """
+    )
 
 
 def submit_medallion_inserts(
@@ -515,8 +555,9 @@ def submit_medallion_inserts(
         """
     )
 
-    # Flink SQL window deduplication purges per-window state after the watermark
-    # closes each window, and RocksDB backs the managed state to avoid heap growth.
+    # Window aggregation emits an append-only final result after the watermark
+    # closes each window. Avoid ROW_NUMBER-based Top-N here because it produces
+    # a changelog/upsert stream that Iceberg requires equality fields for.
     statement_set.add_insert_sql(
         f"""
         INSERT INTO {catalog_name}.silver.transactions
@@ -562,20 +603,24 @@ def submit_medallion_inserts(
         FROM (
             SELECT
                 transaction_id,
-                account_id,
-                device_id,
-                amount,
-                currency,
-                event_time,
-                event_time_epoch_us,
-                location,
-                is_flagged_suspicious,
                 window_start,
                 window_end,
-                ROW_NUMBER() OVER (
-                    PARTITION BY window_start, window_end, transaction_id
-                    ORDER BY event_time ASC
-                ) AS rownum
+                MIN(account_id) AS account_id,
+                MIN(device_id) AS device_id,
+                MIN(amount) AS amount,
+                MIN(currency) AS currency,
+                MIN(event_time) AS event_time,
+                MIN(event_time_epoch_us) AS event_time_epoch_us,
+                MIN(location) AS location,
+                CASE
+                    WHEN MAX(
+                        CASE
+                            WHEN is_flagged_suspicious THEN 1
+                            ELSE 0
+                        END
+                    ) = 1 THEN TRUE
+                    ELSE FALSE
+                END AS is_flagged_suspicious
             FROM TABLE(
                 TUMBLE(
                     TABLE financial_transactions_valid,
@@ -583,18 +628,24 @@ def submit_medallion_inserts(
                     INTERVAL '{config.dedup_window_minutes}' MINUTES
                 )
             )
+            GROUP BY window_start, window_end, transaction_id
         )
-        WHERE rownum = 1
         """
     )
 
+    table_result = statement_set.execute()
     LOGGER.info(
         "Submitted Bronze/Silver Iceberg inserts. Silver rows are emitted after "
         "each %s minute event-time window closes plus %s seconds of allowed lateness.",
         config.dedup_window_minutes,
         config.watermark_lateness_seconds,
     )
-    statement_set.execute().wait()
+
+    if config.wait_for_job:
+        LOGGER.info("Waiting for streaming job because FLINK_WAIT_FOR_JOB is enabled")
+        table_result.wait()
+    else:
+        LOGGER.info("Streaming job submitted; set FLINK_WAIT_FOR_JOB=true to block")
 
 
 def configure_logging(level: str) -> None:
@@ -654,6 +705,21 @@ def _int_env(name: str, default: int) -> int:
     except ValueError:
         LOGGER.warning("Invalid integer for %s=%r; using default %s", name, value, default)
         return default
+
+
+def _bool_env(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "t", "yes", "y", "on"}:
+        return True
+    if normalized in {"0", "false", "f", "no", "n", "off"}:
+        return False
+
+    LOGGER.warning("Invalid boolean for %s=%r; using default %s", name, value, default)
+    return default
 
 
 if __name__ == "__main__":

@@ -23,6 +23,10 @@ class IcebergInitTests(unittest.TestCase):
         self.assertIn("compression_codec = 'ZSTD'", rendered)
         self.assertIn("partitioning = ARRAY['year', 'month', 'day', 'hour']", rendered)
         self.assertIn("object_store_layout_enabled = true", rendered)
+        self.assertIn("ARRAY['write.upsert.enabled', 'write.data.path']", rendered)
+        self.assertIn("ARRAY['false', 's3://warehouse/data']", rendered)
+        self.assertNotIn("write.equality-delete.sort-order", rendered)
+        self.assertNotIn("write.object-storage.path", rendered)
         self.assertNotIn("gold_hourly_liquidity", rendered)
 
     def test_build_init_statements_rejects_unsafe_catalog(self) -> None:
