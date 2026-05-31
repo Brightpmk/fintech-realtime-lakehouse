@@ -169,7 +169,7 @@ services:
     environment:
       <<: *aws-env
       FLINK_CHECKPOINT_DIR: s3://warehouse/flink-checkpoints/kafka-to-iceberg
-      FLINK_CHECKPOINT_INTERVAL_MS: 300000
+      FLINK_CHECKPOINT_INTERVAL_MS: 15000
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092,kafka2:29092,kafka3:29092
       SCHEMA_REGISTRY_URL: http://schema-registry:8081
       ICEBERG_REST_URI: http://iceberg-rest:8181
@@ -220,7 +220,7 @@ services:
     environment:
       <<: *aws-env
       FLINK_CHECKPOINT_DIR: s3://warehouse/flink-checkpoints/kafka-to-iceberg
-      FLINK_CHECKPOINT_INTERVAL_MS: 300000
+      FLINK_CHECKPOINT_INTERVAL_MS: 15000
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092,kafka2:29092,kafka3:29092
       SCHEMA_REGISTRY_URL: http://schema-registry:8081
       ICEBERG_REST_URI: http://iceberg-rest:8181
