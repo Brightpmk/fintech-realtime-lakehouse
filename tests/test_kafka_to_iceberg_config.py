@@ -63,7 +63,7 @@ class KafkaToIcebergConfigTests(unittest.TestCase):
             "FLINK_SOURCE_IDLE_TIMEOUT": "15 s",
             "AWS_ACCESS_KEY_ID": "test-key",
             "AWS_SECRET_ACCESS_KEY": "test-secret",
-            "PII_HASH_SALT": "test-salt",
+            "PII_HASH_SALT": "0123456789abcdef0123456789abcdef",
             "FLINK_WAIT_FOR_JOB": "true",
         }
 
@@ -81,7 +81,7 @@ class KafkaToIcebergConfigTests(unittest.TestCase):
         self.assertEqual(config.source_idle_timeout, "15 s")
         self.assertEqual(config.s3_access_key_id, "test-key")
         self.assertEqual(config.s3_secret_access_key, "test-secret")
-        self.assertEqual(config.pii_hash_salt, "test-salt")
+        self.assertEqual(config.pii_hash_salt, "0123456789abcdef0123456789abcdef")
         self.assertTrue(config.wait_for_job)
 
     def test_default_state_ttl_calculation(self) -> None:
@@ -90,11 +90,40 @@ class KafkaToIcebergConfigTests(unittest.TestCase):
             "WATERMARK_LATENESS_SECONDS": "20",
             "AWS_ACCESS_KEY_ID": "test-key",
             "AWS_SECRET_ACCESS_KEY": "test-secret",
-            "PII_HASH_SALT": "test-salt",
+            "PII_HASH_SALT": "0123456789abcdef0123456789abcdef",
         }
         with patch.dict(os.environ, env, clear=True):
             config = job.JobConfig.from_env()
         self.assertEqual(config.table_state_ttl, "7 min")
+
+    def test_pii_hash_salt_validation(self) -> None:
+        base_env = {
+            "AWS_ACCESS_KEY_ID": "test-key",
+            "AWS_SECRET_ACCESS_KEY": "test-secret",
+        }
+
+        # Test missing PII_HASH_SALT
+        with patch.dict(os.environ, base_env, clear=True):
+            with self.assertRaisesRegex(ValueError, "PII_HASH_SALT environment variable is required"):
+                job.JobConfig.from_env()
+
+        # Test too short PII_HASH_SALT
+        env_short = {**base_env, "PII_HASH_SALT": "0123456789abcdef0123456789abcde"}
+        with patch.dict(os.environ, env_short, clear=True):
+            with self.assertRaisesRegex(ValueError, "PII_HASH_SALT must be at least 32 hex characters"):
+                job.JobConfig.from_env()
+
+        # Test non-hex characters (even if length is sufficient)
+        env_non_hex = {**base_env, "PII_HASH_SALT": "0123456789abcdef0123456789abcdeg"}
+        with patch.dict(os.environ, env_non_hex, clear=True):
+            with self.assertRaisesRegex(ValueError, "PII_HASH_SALT must be at least 32 hex characters"):
+                job.JobConfig.from_env()
+
+        # Test valid hex salt (exactly 32 chars)
+        env_valid = {**base_env, "PII_HASH_SALT": "0123456789abcdef0123456789abcdef"}
+        with patch.dict(os.environ, env_valid, clear=True):
+            config = job.JobConfig.from_env()
+            self.assertEqual(config.pii_hash_salt, "0123456789abcdef0123456789abcdef")
 
     def test_transaction_ddl_uses_authoritative_event_time_contract(self) -> None:
         script = Path("streaming/jobs/kafka_to_iceberg.py").read_text(encoding="utf-8")

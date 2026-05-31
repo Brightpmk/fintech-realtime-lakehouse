@@ -88,6 +88,13 @@ class JobConfig:
             raise ValueError("AWS_SECRET_ACCESS_KEY environment variable is required")
         if not pii_hash_salt:
             raise ValueError("PII_HASH_SALT environment variable is required")
+        if len(pii_hash_salt) < 32 or not all(
+            c in "0123456789abcdefABCDEF" for c in pii_hash_salt
+        ):
+            raise ValueError(
+                "PII_HASH_SALT must be at least 32 hex characters. "
+                'Generate one with: python -c "import secrets; print(secrets.token_hex(32))"'
+            )
 
         return cls(
             kafka_bootstrap_servers=os.getenv(

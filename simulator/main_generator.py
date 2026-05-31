@@ -246,11 +246,19 @@ class TransactionProducer:
             self.mark_failed()
             return False
         except SchemaRegistryError as exc:
-            LOGGER.error("Schema Registry error while serializing record: %s", exc, exc_info=True)
+            LOGGER.error(
+                "Schema Registry error while serializing record transaction_id=%s: %s",
+                record.get("transaction_id", "UNKNOWN"),
+                exc,
+            )
             self.mark_failed()
             return False
         except Exception as exc:
-            LOGGER.error("Failed to serialize or enqueue record: %s", exc, exc_info=True)
+            LOGGER.error(
+                "Failed to serialize or enqueue record transaction_id=%s: %s",
+                record.get("transaction_id", "UNKNOWN"),
+                type(exc).__name__,
+            )
             self.mark_failed()
             return False
 

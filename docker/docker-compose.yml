@@ -419,7 +419,7 @@ services:
       TRINO_STATEMENT_URL: http://trino:8080/v1/statement
       TRINO_USER: ${TRINO_USER:-admin}
       ICEBERG_MAINTENANCE_TABLES: iceberg.bronze.transactions,iceberg.silver.transactions,iceberg.gold.gold_hourly_liquidity,iceberg.gold.gold_fraud_alerts
-      ICEBERG_MAINTENANCE_FILE_SIZE_THRESHOLD: 32MB
+      ICEBERG_MAINTENANCE_FILE_SIZE_THRESHOLD: 128MB
       ICEBERG_MAINTENANCE_RETENTION_THRESHOLD: 7d
       ICEBERG_MAINTENANCE_RETAIN_LAST: 10
       ICEBERG_MAINTENANCE_LOOP: "false"

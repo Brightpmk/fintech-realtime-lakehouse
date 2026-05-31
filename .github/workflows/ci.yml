@@ -58,6 +58,13 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Generate ephemeral test secrets
+        run: |
+          echo "AWS_ACCESS_KEY_ID=ci-test-key" >> $GITHUB_ENV
+          echo "AWS_SECRET_ACCESS_KEY=$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')" >> $GITHUB_ENV
+          echo "PII_HASH_SALT=$(python3 -c 'import secrets; print(secrets.token_hex(32))')" >> $GITHUB_ENV
+          echo "ICEBERG_CATALOG_DB_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')" >> $GITHUB_ENV
+
       - name: Run dbt against local Trino/Iceberg stack
         run: docker compose -f docker/docker-compose.yml --profile dbt run --rm dbt-runner
 
