@@ -20,6 +20,3 @@ models:
   fintech_realtime_lakehouse:
     gold:
       +schema: gold
-      +materialized: incremental
-      +incremental_strategy: merge
-      +on_schema_change: sync_all_columns

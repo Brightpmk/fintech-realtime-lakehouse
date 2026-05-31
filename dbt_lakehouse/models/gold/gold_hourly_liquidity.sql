@@ -13,17 +13,13 @@
         materialized='incremental',
         unique_key='hourly_liquidity_key',
         incremental_strategy='merge',
-        on_schema_change='sync_all_columns',
+        on_schema_change='append_new_columns',
         predicates=[destination_partition_predicate | trim],
         properties={
             "format": "'PARQUET'",
             "format_version": "2",
             "compression_codec": "'ZSTD'",
-            "partitioning": "ARRAY['year', 'month', 'day', 'hour']",
-            "max_commit_retry": "10",
-            "delete_after_commit_enabled": "true",
-            "max_previous_versions": "20",
-            "object_store_layout_enabled": "true"
+            "partitioning": "ARRAY['year', 'month', 'day', 'hour']"
         }
     )
 }}
@@ -65,7 +61,7 @@ hourly_aggregates as (
         count(*) as transaction_count,
         count_if(is_flagged_suspicious) as suspicious_transaction_count,
         sum(amount) as total_amount,
-        sum(amount) as net_amount,
+        sum(case when is_flagged_suspicious then cast(0.00 as decimal(18,2)) else amount end) as net_amount,
         year,
         month,
         day,
@@ -81,7 +77,7 @@ hourly_aggregates as (
 )
 
 select
-    concat(cast(hour_bucket as varchar), '|', currency) as hourly_liquidity_key,
+    concat(date_format(hour_bucket, '%Y-%m-%d %H:%i:%s'), '|', currency) as hourly_liquidity_key,
     hour_bucket,
     currency,
     transaction_count,

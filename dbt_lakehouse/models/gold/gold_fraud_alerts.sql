@@ -11,24 +11,20 @@
 {{
     config(
         materialized='incremental',
-        unique_key='fraud_alert_key',
+        unique_key='transaction_id',
         incremental_strategy='merge',
-        on_schema_change='sync_all_columns',
+        on_schema_change='append_new_columns',
         predicates=[destination_partition_predicate | trim],
         properties={
             "format": "'PARQUET'",
             "format_version": "2",
             "compression_codec": "'ZSTD'",
-            "partitioning": "ARRAY['year', 'month', 'day', 'hour']",
-            "max_commit_retry": "10",
-            "delete_after_commit_enabled": "true",
-            "max_previous_versions": "20",
-            "object_store_layout_enabled": "true"
+            "partitioning": "ARRAY['year', 'month', 'day', 'hour']"
         }
     )
 }}
 
-with silver_transactions as (
+with raw_silver as (
     select
         s.transaction_id,
         s.account_id,
@@ -42,7 +38,11 @@ with silver_transactions as (
         s."year" as year,
         s."month" as month,
         s."day" as day,
-        s."hour" as hour
+        s."hour" as hour,
+        row_number() over (
+            partition by s.transaction_id
+            order by s.event_time desc, s.ingest_time desc
+        ) as row_num
     from {{ source('silver', 'transactions') }} as s
     where s.transaction_id is not null
       and s.event_time is not null
@@ -61,6 +61,25 @@ with silver_transactions as (
       {% if is_incremental() %}
       and {{ lakehouse_partition_hour_key('s') }} >= {{ lakehouse_cutoff_partition_hour_key(lookback_hours) }}
       {% endif %}
+),
+
+silver_transactions as (
+    select
+        transaction_id,
+        account_id,
+        device_id,
+        amount,
+        currency,
+        location,
+        is_flagged_suspicious,
+        event_time,
+        event_time_epoch_us,
+        year,
+        month,
+        day,
+        hour
+    from raw_silver
+    where row_num = 1
 ),
 
 classified as (
