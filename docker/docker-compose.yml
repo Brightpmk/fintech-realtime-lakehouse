@@ -198,27 +198,50 @@ services:
     networks:
       - fintech_network
 
+  iceberg-catalog-db:
+    image: postgres:16-alpine
+    container_name: fintech-iceberg-catalog-db
+    hostname: iceberg-catalog-db
+    environment:
+      POSTGRES_DB: ${ICEBERG_CATALOG_DB_NAME:-iceberg}
+      POSTGRES_USER: ${ICEBERG_CATALOG_DB_USER:-iceberg}
+      POSTGRES_PASSWORD: ${ICEBERG_CATALOG_DB_PASSWORD:-iceberg}
+    volumes:
+      - iceberg_catalog_db:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}" ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    networks:
+      - fintech_network
+
   iceberg-rest:
-    image: apache/iceberg-rest-fixture:1.10.1
+    build:
+      context: .
+      dockerfile: iceberg-rest/Dockerfile
+    image: fintech-iceberg-rest:1.10.1-postgres
     container_name: fintech-iceberg-rest
     hostname: iceberg-rest
-    user: "0:0"
     depends_on:
+      iceberg-catalog-db:
+        condition: service_healthy
       minio-init:
         condition: service_completed_successfully
     ports:
       - "8181:8181"
     environment:
       <<: *aws-env
-      CATALOG_URI: jdbc:sqlite:/catalog/iceberg_catalog.db?journal_mode=WAL&busy_timeout=60000
+      CATALOG_URI: jdbc:postgresql://iceberg-catalog-db:5432/${ICEBERG_CATALOG_DB_NAME:-iceberg}
+      CATALOG_JDBC_USER: ${ICEBERG_CATALOG_DB_USER:-iceberg}
+      CATALOG_JDBC_PASSWORD: ${ICEBERG_CATALOG_DB_PASSWORD:-iceberg}
       CATALOG_WAREHOUSE: s3://warehouse/
       CATALOG_IO__IMPL: org.apache.iceberg.aws.s3.S3FileIO
       CATALOG_S3_ENDPOINT: http://minio:9000
       CATALOG_S3_PATH__STYLE__ACCESS: "true"
       CATALOG_S3_ACCESS__KEY__ID: ${AWS_ACCESS_KEY_ID:-admin}
       CATALOG_S3_SECRET__ACCESS__KEY: ${AWS_SECRET_ACCESS_KEY:-password}
-    volumes:
-      - iceberg_catalog:/catalog
     healthcheck:
       test: [ "CMD-SHELL", "curl -fsS http://localhost:8181/v1/config >/dev/null" ]
       interval: 10s
@@ -312,4 +335,4 @@ volumes:
   kafka_data:
   minio_data:
   flink_checkpoints:
-  iceberg_catalog:
+  iceberg_catalog_db:
