@@ -343,8 +343,32 @@ services:
       - ..:/workspace
     entrypoint: [ "/bin/sh", "-lc" ]
     command:
-      - >
-        python ../storage/iceberg_init.py && dbt debug --profiles-dir . && dbt run --profiles-dir . --select gold && dbt test --profiles-dir . --select gold
+        - >
+          python ../storage/iceberg_init.py &&
+          python -c "
+          import urllib.request, json, sys, time
+          url = 'http://trino:8080/v1/statement'
+          user = 'admin'
+          def post(q):
+              req = urllib.request.Request(url, data=q.encode(), headers={'X-Trino-User': user, 'Content-Type': 'text/plain'})
+              return json.loads(urllib.request.urlopen(req).read())
+          print('Waiting for Silver rows...', flush=True)
+          while True:
+              r = post('SELECT count(*) FROM iceberg.silver.transactions')
+              uri = r.get('nextUri')
+              while uri:
+                  r = json.loads(urllib.request.urlopen(uri).read())
+                  uri = r.get('nextUri')
+              rows = (r.get('data') or [[0]])[0][0]
+              if rows and rows > 0:
+                  print(f'Silver ready: {rows} rows', flush=True)
+                  break
+              print(f'Silver not ready yet ({rows} rows), retrying in 15s...', flush=True)
+              time.sleep(15)
+          " &&
+          dbt debug --profiles-dir . &&
+          dbt run --profiles-dir . --select gold &&
+          dbt test --profiles-dir . --select gold
     networks:
       - fintech_network
 

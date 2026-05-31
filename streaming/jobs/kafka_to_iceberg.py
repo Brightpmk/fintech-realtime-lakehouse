@@ -382,6 +382,8 @@ def register_iceberg_catalog_and_tables(
             'write.format.default' = 'parquet',
             'write.parquet.compression-codec' = 'zstd',
             'write.target-file-size-bytes' = '134217728',
+            'write.distribution-mode' = 'range',
+            'write.sort.order' = 'event_time ASC, transaction_id ASC',
             'write.metadata.delete-after-commit.enabled' = 'true',
             'write.metadata.previous-versions-max' = '20'
         )
@@ -414,6 +416,8 @@ def register_iceberg_catalog_and_tables(
             'write.format.default' = 'parquet',
             'write.parquet.compression-codec' = 'zstd',
             'write.target-file-size-bytes' = '134217728',
+            'write.distribution-mode' = 'range',
+            'write.sort.order' = 'event_time ASC, transaction_id ASC',
             'write.metadata.delete-after-commit.enabled' = 'true',
             'write.metadata.previous-versions-max' = '20'
         )
