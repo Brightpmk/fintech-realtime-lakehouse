@@ -13,7 +13,4 @@ clean-targets:
   - target
   - dbt_packages
 
-models:
-  fintech_realtime_lakehouse:
-    gold:
-      +schema: gold
+

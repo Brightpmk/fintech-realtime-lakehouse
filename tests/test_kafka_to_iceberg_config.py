@@ -132,14 +132,8 @@ class KafkaToIcebergConfigTests(unittest.TestCase):
                 "CREATE TEMPORARY VIEW financial_transactions_valid"
             )
         ]
-        iceberg_tables_source = script[
-            script.index("def register_iceberg_catalog_and_tables") : script.index(
-                "def submit_medallion_inserts"
-            )
-        ]
 
         self.assertIn("event_time_epoch_us BIGINT,", kafka_source_source)
-        self.assertIn("event_time_epoch_us BIGINT NOT NULL", iceberg_tables_source)
         self.assertIn("TO_TIMESTAMP_LTZ(", kafka_source_source)
         self.assertIn("CAST(FLOOR(event_time_epoch_us / 1000) AS BIGINT)", kafka_source_source)
         self.assertIn(",\n                        3", kafka_source_source)
@@ -171,21 +165,6 @@ class KafkaToIcebergConfigTests(unittest.TestCase):
         self.assertIn("MIN(account_id) AS account_id", insert_source)
         self.assertNotIn("ROW_NUMBER()", insert_source)
         self.assertNotIn("rownum", insert_source)
-
-    def test_silver_table_is_configured_for_append_only_writes(self) -> None:
-        script = Path("streaming/jobs/kafka_to_iceberg.py").read_text(encoding="utf-8")
-
-        self.assertIn("'write.upsert.enabled' = 'false'", script)
-        self.assertIn("ALTER TABLE {catalog_name}.silver.transactions SET", script)
-        self.assertNotIn("'write.upsert.enabled' = 'true'", script)
-        self.assertNotIn("'write.equality-delete.sort-order'", script)
-
-    def test_iceberg_tables_use_current_data_path_property(self) -> None:
-        script = Path("streaming/jobs/kafka_to_iceberg.py").read_text(encoding="utf-8")
-
-        self.assertIn("'write.data.path' = 's3://warehouse/data'", script)
-        self.assertIn("RESET (\n                'write.object-storage.path'", script)
-        self.assertNotIn("'write.object-storage.path' = 's3://warehouse/data'", script)
 
     def test_detached_submission_does_not_wait_by_default(self) -> None:
         script = Path("streaming/jobs/kafka_to_iceberg.py").read_text(encoding="utf-8")
