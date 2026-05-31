@@ -8,15 +8,11 @@ from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 from typing import Any
 
-try:
-    from confluent_kafka import KafkaError, Producer
-    from confluent_kafka.schema_registry import Schema, SchemaRegistryClient
-    from confluent_kafka.schema_registry.avro import AvroSerializer
-    from confluent_kafka.schema_registry.error import SchemaRegistryError
-    from confluent_kafka.serialization import MessageField, SerializationContext, StringSerializer
-except ImportError:
-    KafkaError = Producer = Schema = SchemaRegistryClient = AvroSerializer = MessageField = SerializationContext = StringSerializer = None
-    SchemaRegistryError = Exception
+from confluent_kafka import KafkaError, Producer
+from confluent_kafka.schema_registry import Schema, SchemaRegistryClient
+from confluent_kafka.schema_registry.avro import AvroSerializer
+from confluent_kafka.schema_registry.error import SchemaRegistryError
+from confluent_kafka.serialization import MessageField, SerializationContext, StringSerializer
 from faker import Faker
 from fastavro import parse_schema
 
