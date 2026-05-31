@@ -2,7 +2,7 @@
   "type": "record",
   "name": "TransactionEvent",
   "namespace": "com.fintech.lakehouse",
-  "doc": "Financial transaction event contract for the real-time lakehouse ingestion pipeline.",
+  "doc": "Financial transaction event contract for the real-time lakehouse ingestion pipeline. SCHEMA EVOLUTION RULES: (1) New fields MUST use a union type ['null', '<type>'] with a default of null to preserve BACKWARD_TRANSITIVE compatibility. (2) Existing field names and types MUST NOT be changed or removed. (3) Field ordering MUST be preserved — append new fields at the end only.",
   "fields": [
     {
       "name": "transaction_id",

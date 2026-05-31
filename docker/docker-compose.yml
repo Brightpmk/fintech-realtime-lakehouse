@@ -27,7 +27,7 @@ x-kafka-env: &kafka-env
 x-flink-env: &flink-env
   <<: *aws-env
   FLINK_CHECKPOINT_DIR: s3://warehouse/flink-checkpoints/kafka-to-iceberg
-  FLINK_CHECKPOINT_INTERVAL_MS: 15000
+  FLINK_CHECKPOINT_INTERVAL_MS: 60000
   KAFKA_BOOTSTRAP_SERVERS: kafka:29092,kafka2:29092,kafka3:29092
   SCHEMA_REGISTRY_URL: http://schema-registry:8081
   ICEBERG_REST_URI: http://iceberg-rest:8181
@@ -43,42 +43,42 @@ services:
     image: confluentinc/cp-kafka:8.2.1
     container_name: fintech-kafka
     hostname: kafka
-    ports: ["9092:9092"]
+    ports: [ "9092:9092" ]
     environment:
       <<: *kafka-env
       KAFKA_NODE_ID: 1
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
-    volumes: ["kafka_data:/var/lib/kafka/data"]
-    healthcheck: { test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092 >/dev/null 2>&1"], interval: 10s, timeout: 10s, retries: 12, start_period: 40s }
-    networks: ["fintech_network"]
+    volumes: [ "kafka_data:/var/lib/kafka/data" ]
+    healthcheck: { test: [ "CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092 >/dev/null 2>&1" ], interval: 10s, timeout: 10s, retries: 12, start_period: 40s }
+    networks: [ "fintech_network" ]
 
   kafka2:
     image: confluentinc/cp-kafka:8.2.1
     container_name: fintech-kafka2
     hostname: kafka2
-    ports: ["9093:9093"]
+    ports: [ "9093:9093" ]
     environment:
       <<: *kafka-env
       KAFKA_NODE_ID: 2
       KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,CONTROLLER://0.0.0.0:29093,PLAINTEXT_HOST://0.0.0.0:9093
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka2:29092,PLAINTEXT_HOST://localhost:9093
-    volumes: ["kafka2_data:/var/lib/kafka/data"]
-    healthcheck: { test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9093 >/dev/null 2>&1"], interval: 10s, timeout: 10s, retries: 12, start_period: 40s }
-    networks: ["fintech_network"]
+    volumes: [ "kafka2_data:/var/lib/kafka/data" ]
+    healthcheck: { test: [ "CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9093 >/dev/null 2>&1" ], interval: 10s, timeout: 10s, retries: 12, start_period: 40s }
+    networks: [ "fintech_network" ]
 
   kafka3:
     image: confluentinc/cp-kafka:8.2.1
     container_name: fintech-kafka3
     hostname: kafka3
-    ports: ["9094:9094"]
+    ports: [ "9094:9094" ]
     environment:
       <<: *kafka-env
       KAFKA_NODE_ID: 3
       KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,CONTROLLER://0.0.0.0:29093,PLAINTEXT_HOST://0.0.0.0:9094
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka3:29092,PLAINTEXT_HOST://localhost:9094
-    volumes: ["kafka3_data:/var/lib/kafka/data"]
-    healthcheck: { test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9094 >/dev/null 2>&1"], interval: 10s, timeout: 10s, retries: 12, start_period: 40s }
-    networks: ["fintech_network"]
+    volumes: [ "kafka3_data:/var/lib/kafka/data" ]
+    healthcheck: { test: [ "CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9094 >/dev/null 2>&1" ], interval: 10s, timeout: 10s, retries: 12, start_period: 40s }
+    networks: [ "fintech_network" ]
 
   schema-registry:
     image: confluentinc/cp-schema-registry:8.2.1
@@ -88,15 +88,15 @@ services:
       kafka: { condition: service_healthy }
       kafka2: { condition: service_healthy }
       kafka3: { condition: service_healthy }
-    ports: ["8081:8081"]
+    ports: [ "8081:8081" ]
     environment:
       SCHEMA_REGISTRY_HOST_NAME: schema-registry
       SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
       SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: PLAINTEXT://kafka:29092,PLAINTEXT://kafka2:29092,PLAINTEXT://kafka3:29092
       SCHEMA_REGISTRY_SCHEMA_REGISTRY_INTER_INSTANCE_PROTOCOL: http
       SCHEMA_REGISTRY_LOG4J_ROOT_LOGLEVEL: INFO
-    healthcheck: { test: ["CMD-SHELL", "curl -fsS http://localhost:8081/subjects >/dev/null"], interval: 10s, timeout: 5s, retries: 12, start_period: 30s }
-    networks: ["fintech_network"]
+    healthcheck: { test: [ "CMD-SHELL", "curl -fsS http://localhost:8081/subjects >/dev/null" ], interval: 10s, timeout: 5s, retries: 12, start_period: 30s }
+    networks: [ "fintech_network" ]
 
   flink-jobmanager:
     build: { context: ., dockerfile: flink/Dockerfile }
@@ -111,7 +111,7 @@ services:
       schema-registry: { condition: service_healthy }
       minio-init: { condition: service_completed_successfully }
       iceberg-rest: { condition: service_healthy }
-    ports: ["8082:8081"]
+    ports: [ "8082:8081" ]
     environment:
       <<: *flink-env
       FLINK_PROPERTIES: |
@@ -125,10 +125,10 @@ services:
         classloader.parent-first-patterns.additional: com.codahale.metrics.
         s3.endpoint: http://minio:9000
         s3.path.style.access: true
-    volumes: ["../tmp/jars:/opt/flink/usrlib:ro"]
-    healthcheck: { test: ["CMD-SHELL", "curl -fsS http://localhost:8081/jobs > /dev/null"], interval: 20s, timeout: 10s, retries: 5, start_period: 40s }
+    volumes: [ "../tmp/jars:/opt/flink/usrlib:ro" ]
+    healthcheck: { test: [ "CMD-SHELL", "curl -fsS http://localhost:8081/jobs > /dev/null" ], interval: 20s, timeout: 10s, retries: 5, start_period: 40s }
     restart: on-failure
-    networks: ["fintech_network"]
+    networks: [ "fintech_network" ]
 
   flink-taskmanager:
     build: { context: ., dockerfile: flink/Dockerfile }
@@ -156,26 +156,26 @@ services:
         classloader.parent-first-patterns.additional: com.codahale.metrics.
         s3.endpoint: http://minio:9000
         s3.path.style.access: true
-    volumes: ["../tmp/jars:/opt/flink/usrlib:ro"]
+    volumes: [ "../tmp/jars:/opt/flink/usrlib:ro" ]
     restart: on-failure
-    networks: ["fintech_network"]
+    networks: [ "fintech_network" ]
 
   minio:
     image: minio/minio:RELEASE.2025-09-07T16-13-09Z
     container_name: fintech-minio
     hostname: minio
     command: server /data --console-address ":9001"
-    ports: ["9000:9000", "9001:9001"]
+    ports: [ "9000:9000", "9001:9001" ]
     environment:
       MINIO_ROOT_USER: ${AWS_ACCESS_KEY_ID:?AWS_ACCESS_KEY_ID is required}
       MINIO_ROOT_PASSWORD: ${AWS_SECRET_ACCESS_KEY:?AWS_SECRET_ACCESS_KEY is required}
       MINIO_REGION_NAME: ${AWS_REGION:-us-east-1}
       MINIO_DOMAIN: minio
-    volumes: ["minio_data:/data"]
-    healthcheck: { test: ["CMD-SHELL", "curl -fsS http://localhost:9000/minio/health/ready >/dev/null"], interval: 10s, timeout: 5s, retries: 12, start_period: 20s }
+    volumes: [ "minio_data:/data" ]
+    healthcheck: { test: [ "CMD-SHELL", "curl -fsS http://localhost:9000/minio/health/ready >/dev/null" ], interval: 10s, timeout: 5s, retries: 12, start_period: 20s }
     networks:
       fintech_network:
-        aliases: ["warehouse.minio"]
+        aliases: [ "warehouse.minio" ]
 
   minio-init:
     image: minio/mc:RELEASE.2025-08-13T08-35-41Z
@@ -184,8 +184,8 @@ services:
       minio: { condition: service_healthy }
     environment:
       <<: *aws-env
-    entrypoint: ["/bin/sh", "-c", "echo \"Configuring mc alias...\" && for i in $$(seq 1 30); do mc alias set local http://minio:9000 \"$$AWS_ACCESS_KEY_ID\" \"$$AWS_SECRET_ACCESS_KEY\" && break || sleep 3; done && mc mb --ignore-existing local/warehouse && mc anonymous set none local/warehouse"]
-    networks: ["fintech_network"]
+    entrypoint: [ "/bin/sh", "-c", "echo \"Configuring mc alias...\" && for i in $$(seq 1 30); do mc alias set local http://minio:9000 \"$$AWS_ACCESS_KEY_ID\" \"$$AWS_SECRET_ACCESS_KEY\" && break || sleep 3; done && mc mb --ignore-existing local/warehouse && mc anonymous set none local/warehouse" ]
+    networks: [ "fintech_network" ]
 
   iceberg-catalog-db:
     image: postgres:16-alpine
@@ -195,9 +195,9 @@ services:
       POSTGRES_DB: ${ICEBERG_CATALOG_DB_NAME:-iceberg}
       POSTGRES_USER: ${ICEBERG_CATALOG_DB_USER:-iceberg}
       POSTGRES_PASSWORD: ${ICEBERG_CATALOG_DB_PASSWORD:?ICEBERG_CATALOG_DB_PASSWORD is required}
-    volumes: ["iceberg_catalog_db:/var/lib/postgresql/data"]
-    healthcheck: { test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"], interval: 10s, timeout: 5s, retries: 12, start_period: 20s }
-    networks: ["fintech_network"]
+    volumes: [ "iceberg_catalog_db:/var/lib/postgresql/data" ]
+    healthcheck: { test: [ "CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}" ], interval: 10s, timeout: 5s, retries: 12, start_period: 20s }
+    networks: [ "fintech_network" ]
 
   iceberg-rest:
     build: { context: ., dockerfile: iceberg-rest/Dockerfile }
@@ -207,7 +207,7 @@ services:
     depends_on:
       iceberg-catalog-db: { condition: service_healthy }
       minio-init: { condition: service_completed_successfully }
-    ports: ["8181:8181"]
+    ports: [ "8181:8181" ]
     environment:
       <<: *aws-env
       CATALOG_URI: jdbc:postgresql://iceberg-catalog-db:5432/${ICEBERG_CATALOG_DB_NAME:-iceberg}
@@ -220,14 +220,16 @@ services:
       CATALOG_S3_ACCESS__KEY__ID: ${AWS_ACCESS_KEY_ID:?AWS_ACCESS_KEY_ID is required}
       CATALOG_S3_SECRET__ACCESS__KEY: ${AWS_SECRET_ACCESS_KEY:?AWS_SECRET_ACCESS_KEY is required}
       CATALOG_JDBC_INIT_RETRY: "10"
-    healthcheck: { test: ["CMD-SHELL", "curl -fsS http://localhost:8181/v1/config >/dev/null"], interval: 10s, timeout: 5s, retries: 12, start_period: 30s }
-    networks: ["fintech_network"]
+      CATALOG_JDBC_MAX_CONNECTIONS: "10"
+      CATALOG_JDBC_CONNECTION_TIMEOUT: "30000"
+    healthcheck: { test: [ "CMD-SHELL", "curl -fsS http://localhost:8181/v1/config >/dev/null" ], interval: 10s, timeout: 5s, retries: 12, start_period: 30s }
+    networks: [ "fintech_network" ]
 
   dbt-runner:
     build: { context: .., dockerfile: docker/dbt/Dockerfile }
     image: fintech-dbt-runner:1.10.2
     container_name: fintech-dbt-runner
-    profiles: ["dbt"]
+    profiles: [ "dbt" ]
     depends_on:
       trino: { condition: service_healthy }
     working_dir: /workspace/dbt_lakehouse
@@ -241,15 +243,15 @@ services:
       TRINO_USER: ${TRINO_USER:-admin}
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
       DBT_SILVER_WAIT_TIMEOUT_SECONDS: 1800
-    volumes: ["..:/workspace"]
-    entrypoint: ["/bin/sh", "-lc"]
+    volumes: [ "..:/workspace" ]
+    entrypoint: [ "/bin/sh", "-lc" ]
     command: "python3 ../storage/wait_for_silver.py && dbt debug --profiles-dir . && dbt run --profiles-dir . --select gold && dbt test --profiles-dir . --select gold"
-    networks: ["fintech_network"]
+    networks: [ "fintech_network" ]
 
   iceberg-maintenance:
     image: python:3.12-slim
     container_name: fintech-iceberg-maintenance
-    profiles: ["maintenance"]
+    profiles: [ "maintenance" ]
     depends_on:
       trino: { condition: service_healthy }
     working_dir: /workspace
@@ -262,23 +264,27 @@ services:
       ICEBERG_MAINTENANCE_RETAIN_LAST: 10
       ICEBERG_MAINTENANCE_LOOP: "false"
       ICEBERG_MAINTENANCE_INTERVAL_SECONDS: 3600
-    volumes: ["..:/workspace"]
-    entrypoint: ["python", "storage/iceberg_maintenance.py"]
-    networks: ["fintech_network"]
+    volumes: [ "..:/workspace" ]
+    entrypoint: [ "python", "storage/iceberg_maintenance.py" ]
+    networks: [ "fintech_network" ]
 
   trino:
+    # WARNING: No authentication configured. DO NOT expose port 8080 in
+    # production. Use Trino's PASSWORD or OAUTH2 authentication and set
+    # ICEBERG_SECURITY_MODE=SYSTEM in the deployment configuration.
     image: trinodb/trino:481
     container_name: fintech-trino
     hostname: trino
     depends_on:
       iceberg-rest: { condition: service_healthy }
       minio-init: { condition: service_completed_successfully }
-    ports: ["8080:8080"]
+    ports: [ "8080:8080" ]
     environment:
       <<: *aws-env
-    volumes: ["./trino/catalog:/etc/trino/catalog:ro"]
-    healthcheck: { test: ["CMD-SHELL", "curl -fsS http://localhost:8080/v1/info >/dev/null"], interval: 10s, timeout: 5s, retries: 12, start_period: 30s }
-    networks: ["fintech_network"]
+      ICEBERG_SECURITY_MODE: ${ICEBERG_SECURITY_MODE:-ALLOW_ALL}
+    volumes: [ "./trino/catalog:/etc/trino/catalog:ro" ]
+    healthcheck: { test: [ "CMD-SHELL", "curl -fsS http://localhost:8080/v1/info >/dev/null" ], interval: 10s, timeout: 5s, retries: 12, start_period: 30s }
+    networks: [ "fintech_network" ]
 
 networks:
   fintech_network:

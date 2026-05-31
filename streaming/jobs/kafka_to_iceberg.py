@@ -104,6 +104,15 @@ def register_kafka_source(table_env: "StreamTableEnvironment", config: JobConfig
 
 
 def register_iceberg_catalog_and_tables(table_env: "StreamTableEnvironment", config: JobConfig) -> None:
+    """Register the Iceberg REST catalog in the Flink session.
+
+    SCHEMA CHANGE PROCEDURE: Any column additions to Bronze/Silver Iceberg
+    tables require a coordinated three-step update:
+      1. ALTER TABLE in Iceberg (via Trino or REST API)
+      2. Update the Flink INSERT SQL in submit_medallion_inserts()
+      3. Redeploy the Flink job using a savepoint
+    New Iceberg columns will be NULL until step 2 is completed.
+    """
     catalog_name = sql_identifier(config.iceberg_catalog_name)
     table_env.execute_sql(f"""
         CREATE CATALOG {catalog_name} WITH (
@@ -120,7 +129,10 @@ def submit_medallion_inserts(table_env: "StreamTableEnvironment", config: JobCon
     statement_set = table_env.create_statement_set()
     statement_set.add_insert_sql(f"INSERT INTO {catalog_name}.bronze.transactions SELECT transaction_id, account_id, amount, currency, event_time_epoch_us, device_id, location, is_flagged_suspicious, CASE WHEN event_time IS NULL THEN NULL ELSE CAST(event_time AS TIMESTAMP(6)) END AS event_time, CAST(CURRENT_TIMESTAMP AS TIMESTAMP(6)) AS ingest_time, CAST(EXTRACT(YEAR FROM COALESCE(event_time, CURRENT_TIMESTAMP)) AS INT) AS `year`, CAST(EXTRACT(MONTH FROM COALESCE(event_time, CURRENT_TIMESTAMP)) AS INT) AS `month`, CAST(EXTRACT(DAY FROM COALESCE(event_time, CURRENT_TIMESTAMP)) AS INT) AS `day`, CAST(EXTRACT(HOUR FROM COALESCE(event_time, CURRENT_TIMESTAMP)) AS INT) AS `hour` FROM financial_transactions_valid")
     statement_set.add_insert_sql(f"INSERT INTO {catalog_name}.bronze.transactions_rejected SELECT transaction_id, account_id, amount, currency, event_time_epoch_us, device_id, location, is_flagged_suspicious, CAST(event_time AS TIMESTAMP(6)) AS event_time, reject_reason, CAST(CURRENT_TIMESTAMP AS TIMESTAMP(6)) AS rejected_at FROM financial_transactions_invalid")
-    statement_set.add_insert_sql(f"INSERT INTO {catalog_name}.silver.transactions SELECT transaction_id, CONCAT('ACC-SHA256-', SUBSTRING(SHA2(CONCAT({sql_literal(config.pii_hash_salt)}, ':', COALESCE(account_id, '')), 256), 1, 16)) AS account_id, amount, currency, event_time_epoch_us, CONCAT('DEV-SHA256-', SUBSTRING(SHA2(CONCAT({sql_literal(config.pii_hash_salt)}, ':', COALESCE(device_id, '')), 256), 1, 16)) AS device_id, location, is_flagged_suspicious, CAST(event_time AS TIMESTAMP(6)) AS event_time, CAST(window_start AS TIMESTAMP(6)) AS dedup_window_start, CAST(window_end AS TIMESTAMP(6)) AS dedup_window_end, CAST(CURRENT_TIMESTAMP AS TIMESTAMP(6)) AS ingest_time, CAST(EXTRACT(YEAR FROM event_time) AS INT) AS `year`, CAST(EXTRACT(MONTH FROM event_time) AS INT) AS `month`, CAST(EXTRACT(DAY FROM event_time) AS INT) AS `day`, CAST(EXTRACT(HOUR FROM event_time) AS INT) AS `hour` FROM (SELECT transaction_id, window_start, window_end, MIN(account_id) AS account_id, MIN(device_id) AS device_id, MIN(amount) AS amount, MIN(currency) AS currency, MIN(event_time) AS event_time, MIN(event_time_epoch_us) AS event_time_epoch_us, MIN(location) AS location, CASE WHEN MAX(CASE WHEN is_flagged_suspicious THEN 1 ELSE 0 END) = 1 THEN TRUE ELSE FALSE END AS is_flagged_suspicious FROM TABLE(TUMBLE(TABLE financial_transactions_valid, DESCRIPTOR(event_time), INTERVAL '{config.dedup_window_minutes}' MINUTES)) GROUP BY window_start, window_end, transaction_id)")
+    # NOTE: MIN() aggregation is safe here because the contract guarantees duplicate
+    # transaction_ids always carry identical payloads (idempotent producer). If corrections
+    # are ever supported, switch MIN() to LAST_VALUE() ordered by event_time_epoch_us.
+    statement_set.add_insert_sql(f"INSERT INTO {catalog_name}.silver.transactions SELECT transaction_id, CONCAT('ACC-SHA256-', SUBSTRING(SHA2(CONCAT({sql_literal(config.pii_hash_salt)}, ':', COALESCE(account_id, '')), 256), 1, 32)) AS account_id, amount, currency, event_time_epoch_us, CONCAT('DEV-SHA256-', SUBSTRING(SHA2(CONCAT({sql_literal(config.pii_hash_salt)}, ':', COALESCE(device_id, '')), 256), 1, 32)) AS device_id, location, is_flagged_suspicious, CAST(event_time AS TIMESTAMP(6)) AS event_time, CAST(window_start AS TIMESTAMP(6)) AS dedup_window_start, CAST(window_end AS TIMESTAMP(6)) AS dedup_window_end, CAST(CURRENT_TIMESTAMP AS TIMESTAMP(6)) AS ingest_time, CAST(EXTRACT(YEAR FROM event_time) AS INT) AS `year`, CAST(EXTRACT(MONTH FROM event_time) AS INT) AS `month`, CAST(EXTRACT(DAY FROM event_time) AS INT) AS `day`, CAST(EXTRACT(HOUR FROM event_time) AS INT) AS `hour` FROM (SELECT transaction_id, window_start, window_end, MIN(account_id) AS account_id, MIN(device_id) AS device_id, MIN(amount) AS amount, MIN(currency) AS currency, MIN(event_time) AS event_time, MIN(event_time_epoch_us) AS event_time_epoch_us, MIN(location) AS location, CASE WHEN MAX(CASE WHEN is_flagged_suspicious THEN 1 ELSE 0 END) = 1 THEN TRUE ELSE FALSE END AS is_flagged_suspicious FROM TABLE(TUMBLE(TABLE financial_transactions_valid, DESCRIPTOR(event_time), INTERVAL '{config.dedup_window_minutes}' MINUTES)) GROUP BY window_start, window_end, transaction_id)")
     table_result = statement_set.execute()
     LOGGER.info("Submitted Bronze/Silver Iceberg inserts. Silver rows are emitted after each %s minute event-time window closes plus %s seconds of allowed lateness.", config.dedup_window_minutes, config.watermark_lateness_seconds)
     if config.wait_for_job:

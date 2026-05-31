@@ -91,7 +91,7 @@ def sql_identifier(val: str) -> str:
     return val
 def _env_val(name: str, default: Any, cast: type) -> Any:
     try: return cast(os.getenv(name, str(default)))
-    except: return default
+    except (ValueError, TypeError): return default
 
 if __name__ == "__main__":
     main()
