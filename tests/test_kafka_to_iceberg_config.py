@@ -77,9 +77,35 @@ class KafkaToIcebergConfigTests(unittest.TestCase):
 
     def test_transaction_ddl_uses_authoritative_event_time_contract(self) -> None:
         script = Path("streaming/jobs/kafka_to_iceberg.py").read_text(encoding="utf-8")
+        kafka_source_source = script[
+            script.index("CREATE TABLE financial_transactions_raw") : script.index(
+                "CREATE TEMPORARY VIEW financial_transactions_valid"
+            )
+        ]
+        iceberg_tables_source = script[
+            script.index("def register_iceberg_catalog_and_tables") : script.index(
+                "def submit_medallion_inserts"
+            )
+        ]
 
-        self.assertIn("event_time_epoch_us BIGINT NOT NULL", script)
+        self.assertIn("event_time_epoch_us BIGINT,", kafka_source_source)
+        self.assertIn("event_time_epoch_us BIGINT NOT NULL", iceberg_tables_source)
         self.assertNotIn("`timestamp` STRING", script)
+
+    def test_invalid_events_are_routed_to_rejected_bronze_table(self) -> None:
+        script = Path("streaming/jobs/kafka_to_iceberg.py").read_text(encoding="utf-8")
+        insert_source = script[
+            script.index("def submit_medallion_inserts") : script.index(
+                "def configure_logging"
+            )
+        ]
+
+        self.assertIn("CREATE TEMPORARY VIEW financial_transactions_invalid", script)
+        self.assertIn("MISSING_EVENT_TIME_EPOCH_US", script)
+        self.assertIn("bronze.transactions_rejected", script)
+        self.assertIn("FROM financial_transactions_valid", insert_source)
+        self.assertIn("FROM financial_transactions_invalid", insert_source)
+        self.assertNotIn("FROM financial_transactions_raw", insert_source)
 
     def test_checkpoint_configuration_has_single_authority(self) -> None:
         script = Path("streaming/jobs/kafka_to_iceberg.py").read_text(encoding="utf-8")

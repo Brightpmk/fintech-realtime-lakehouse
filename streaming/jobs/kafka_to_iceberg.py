@@ -4,7 +4,8 @@ The job consumes the Confluent-wire-format Avro stream produced by the
 transaction simulator, decodes values through Schema Registry, and writes an
 open lakehouse medallion layout on Iceberg:
 
-* ``iceberg.bronze.transactions`` receives append-only raw decoded events.
+* ``iceberg.bronze.transactions`` receives append-only validated decoded events.
+* ``iceberg.bronze.transactions_rejected`` receives malformed decoded events.
 * ``iceberg.silver.transactions`` receives event-time-window deduplicated and
   masked events partitioned by event time for efficient Trino/dbt reads.
 """
@@ -256,13 +257,18 @@ def register_kafka_source(
             account_id STRING,
             amount DECIMAL(18, 2),
             currency STRING,
-            event_time_epoch_us BIGINT NOT NULL,
+            event_time_epoch_us BIGINT,
             device_id STRING,
             location STRING,
             is_flagged_suspicious BOOLEAN,
-            event_time AS TO_TIMESTAMP_LTZ(
-                CAST(FLOOR(event_time_epoch_us / 1000) AS BIGINT),
-                3
+            event_time AS (
+                CASE
+                    WHEN event_time_epoch_us IS NULL THEN NULL
+                    ELSE TO_TIMESTAMP_LTZ(
+                        CAST(FLOOR(event_time_epoch_us / 1000) AS BIGINT),
+                        3
+                    )
+                END
             ),
             WATERMARK FOR event_time AS
                 event_time - INTERVAL '{config.watermark_lateness_seconds}' SECOND
@@ -287,6 +293,32 @@ def register_kafka_source(
         WHERE transaction_id IS NOT NULL
           AND event_time_epoch_us IS NOT NULL
           AND event_time IS NOT NULL
+        """
+    )
+
+    table_env.execute_sql(
+        """
+        CREATE TEMPORARY VIEW financial_transactions_invalid AS
+        SELECT
+            transaction_id,
+            account_id,
+            amount,
+            currency,
+            event_time_epoch_us,
+            device_id,
+            location,
+            is_flagged_suspicious,
+            event_time,
+            CASE
+                WHEN transaction_id IS NULL THEN 'MISSING_TRANSACTION_ID'
+                WHEN event_time_epoch_us IS NULL THEN 'MISSING_EVENT_TIME_EPOCH_US'
+                WHEN event_time IS NULL THEN 'INVALID_EVENT_TIME'
+                ELSE 'UNKNOWN_CONTRACT_VIOLATION'
+            END AS reject_reason
+        FROM financial_transactions_raw
+        WHERE transaction_id IS NULL
+           OR event_time_epoch_us IS NULL
+           OR event_time IS NULL
         """
     )
 
@@ -383,14 +415,40 @@ def register_iceberg_catalog_and_tables(
         """
     )
 
-    LOGGER.info("Registered Iceberg catalog and Bronze/Silver tables")
+    table_env.execute_sql(
+        f"""
+        CREATE TABLE IF NOT EXISTS {catalog_name}.bronze.transactions_rejected (
+            transaction_id STRING,
+            account_id STRING,
+            amount DECIMAL(18, 2),
+            currency STRING,
+            event_time_epoch_us BIGINT,
+            device_id STRING,
+            location STRING,
+            is_flagged_suspicious BOOLEAN,
+            event_time TIMESTAMP(6),
+            reject_reason STRING,
+            rejected_at TIMESTAMP(6)
+        )
+        WITH (
+            'format-version' = '2',
+            'write.format.default' = 'parquet',
+            'write.parquet.compression-codec' = 'zstd',
+            'write.target-file-size-bytes' = '134217728',
+            'write.metadata.delete-after-commit.enabled' = 'true',
+            'write.metadata.previous-versions-max' = '20'
+        )
+        """
+    )
+
+    LOGGER.info("Registered Iceberg catalog and Bronze/Silver/rejected tables")
 
 
 def submit_medallion_inserts(
     table_env: "StreamTableEnvironment",
     config: JobConfig,
 ) -> None:
-    """Run concurrent Bronze raw append and Silver clean deduplicated writes."""
+    """Run concurrent Bronze validated/rejected and Silver deduplicated writes."""
 
     catalog_name = sql_identifier(config.iceberg_catalog_name)
     statement_set = table_env.create_statement_set()
@@ -416,7 +474,26 @@ def submit_medallion_inserts(
             CAST(EXTRACT(MONTH FROM event_time) AS INT) AS `month`,
             CAST(EXTRACT(DAY FROM event_time) AS INT) AS `day`,
             CAST(EXTRACT(HOUR FROM event_time) AS INT) AS `hour`
-        FROM financial_transactions_raw
+        FROM financial_transactions_valid
+        """
+    )
+
+    statement_set.add_insert_sql(
+        f"""
+        INSERT INTO {catalog_name}.bronze.transactions_rejected
+        SELECT
+            transaction_id,
+            account_id,
+            amount,
+            currency,
+            event_time_epoch_us,
+            device_id,
+            location,
+            is_flagged_suspicious,
+            CAST(event_time AS TIMESTAMP(6)) AS event_time,
+            reject_reason,
+            CAST(CURRENT_TIMESTAMP AS TIMESTAMP(6)) AS rejected_at
+        FROM financial_transactions_invalid
         """
     )
 

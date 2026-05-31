@@ -248,6 +248,31 @@ def build_init_statements(catalog: str) -> list[str]:
             object_store_layout_enabled = true
         )
         """,
+        f"""
+        CREATE TABLE IF NOT EXISTS {catalog}.bronze.transactions_rejected (
+            transaction_id varchar,
+            account_id varchar,
+            amount decimal(18, 2),
+            currency varchar,
+            event_time_epoch_us bigint,
+            device_id varchar,
+            location varchar,
+            is_flagged_suspicious boolean,
+            event_time timestamp(3),
+            reject_reason varchar,
+            rejected_at timestamp(3)
+        )
+        WITH (
+            format = 'PARQUET',
+            format_version = 2,
+            compression_codec = 'ZSTD',
+            sorted_by = ARRAY['rejected_at', 'reject_reason'],
+            max_commit_retry = 10,
+            delete_after_commit_enabled = true,
+            max_previous_versions = 20,
+            object_store_layout_enabled = true
+        )
+        """,
     ]
 
 
