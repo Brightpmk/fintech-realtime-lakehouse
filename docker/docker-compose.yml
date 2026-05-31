@@ -17,15 +17,15 @@ services:
       CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
-      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093,2@kafka2:29093,3@kafka3:29093
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,CONTROLLER://0.0.0.0:29093,PLAINTEXT_HOST://0.0.0.0:9092
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
       KAFKA_LOG_DIRS: /var/lib/kafka/data
@@ -40,6 +40,72 @@ services:
     networks:
       - fintech_network
 
+  kafka2:
+    image: confluentinc/cp-kafka:8.2.1
+    container_name: fintech-kafka2
+    hostname: kafka2
+    ports:
+      - "9093:9093"
+    environment:
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+      KAFKA_NODE_ID: 2
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093,2@kafka2:29093,3@kafka3:29093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,CONTROLLER://0.0.0.0:29093,PLAINTEXT_HOST://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka2:29092,PLAINTEXT_HOST://localhost:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+    volumes:
+      - kafka2_data:/var/lib/kafka/data
+    healthcheck:
+      test: [ "CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9093 >/dev/null 2>&1" ]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 40s
+    networks:
+      - fintech_network
+
+  kafka3:
+    image: confluentinc/cp-kafka:8.2.1
+    container_name: fintech-kafka3
+    hostname: kafka3
+    ports:
+      - "9094:9094"
+    environment:
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+      KAFKA_NODE_ID: 3
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093,2@kafka2:29093,3@kafka3:29093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,CONTROLLER://0.0.0.0:29093,PLAINTEXT_HOST://0.0.0.0:9094
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka3:29092,PLAINTEXT_HOST://localhost:9094
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+    volumes:
+      - kafka3_data:/var/lib/kafka/data
+    healthcheck:
+      test: [ "CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9094 >/dev/null 2>&1" ]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 40s
+    networks:
+      - fintech_network
+
   schema-registry:
     image: confluentinc/cp-schema-registry:8.2.1
     container_name: fintech-schema-registry
@@ -47,12 +113,16 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
+      kafka2:
+        condition: service_healthy
+      kafka3:
+        condition: service_healthy
     ports:
       - "8081:8081"
     environment:
       SCHEMA_REGISTRY_HOST_NAME: schema-registry
       SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
-      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: PLAINTEXT://kafka:29092
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: PLAINTEXT://kafka:29092,PLAINTEXT://kafka2:29092,PLAINTEXT://kafka3:29092
       SCHEMA_REGISTRY_SCHEMA_REGISTRY_INTER_INSTANCE_PROTOCOL: http
       SCHEMA_REGISTRY_LOG4J_ROOT_LOGLEVEL: INFO
     healthcheck:
@@ -75,6 +145,10 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
+      kafka2:
+        condition: service_healthy
+      kafka3:
+        condition: service_healthy
       minio-init:
         condition: service_completed_successfully
       iceberg-rest:
@@ -84,7 +158,7 @@ services:
     environment:
       <<: *aws-env
       FLINK_CHECKPOINT_DIR: s3://warehouse/flink-checkpoints/kafka-to-iceberg
-      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092,kafka2:29092,kafka3:29092
       SCHEMA_REGISTRY_URL: http://schema-registry:8081
       ICEBERG_REST_URI: http://iceberg-rest:8181
       S3_ENDPOINT: http://minio:9000
@@ -105,6 +179,13 @@ services:
         s3.path.style.access: true
     volumes:
       - ../tmp/jars:/opt/flink/usrlib:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8081/jobs > /dev/null"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+    restart: on-failure
     networks:
       - fintech_network
 
@@ -118,11 +199,11 @@ services:
     command: taskmanager
     depends_on:
       flink-jobmanager:
-        condition: service_started
+        condition: service_healthy
     environment:
       <<: *aws-env
       FLINK_CHECKPOINT_DIR: s3://warehouse/flink-checkpoints/kafka-to-iceberg
-      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092,kafka2:29092,kafka3:29092
       SCHEMA_REGISTRY_URL: http://schema-registry:8081
       ICEBERG_REST_URI: http://iceberg-rest:8181
       S3_ENDPOINT: http://minio:9000
@@ -140,6 +221,7 @@ services:
         s3.path.style.access: true
     volumes:
       - ../tmp/jars:/opt/flink/usrlib:ro
+    restart: on-failure
     networks:
       - fintech_network
 
@@ -236,7 +318,10 @@ services:
       - fintech_network
 
   dbt-runner:
-    image: python:3.12-slim
+    build:
+      context: ..
+      dockerfile: docker/dbt/Dockerfile
+    image: fintech-dbt-runner:1.10.2
     container_name: fintech-dbt-runner
     profiles:
       - dbt
@@ -258,7 +343,7 @@ services:
     entrypoint: [ "/bin/sh", "-lc" ]
     command:
       - >
-        apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/* && python -m pip install --no-cache-dir --root-user-action=ignore -r requirements.txt && python ../storage/iceberg_init.py && dbt debug --profiles-dir . && dbt run --profiles-dir . --select gold && dbt test --profiles-dir . --select gold
+        python ../storage/iceberg_init.py && dbt debug --profiles-dir . && dbt run --profiles-dir . --select gold && dbt test --profiles-dir . --select gold
     networks:
       - fintech_network
 
@@ -317,5 +402,7 @@ networks:
 
 volumes:
   kafka_data:
+  kafka2_data:
+  kafka3_data:
   minio_data:
   iceberg_catalog_db:
