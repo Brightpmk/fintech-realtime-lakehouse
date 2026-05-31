@@ -32,6 +32,24 @@ class DockerComposeConfigTests(unittest.TestCase):
         self.assertIn("iceberg-rest-adapter.jar:postgresql.jar", dockerfile)
         self.assertIn("org.apache.iceberg.rest.RESTCatalogServer", dockerfile)
 
+    def test_flink_checkpoints_are_stored_in_minio_not_docker_volume(self) -> None:
+        compose = Path("docker/docker-compose.yml").read_text(encoding="utf-8")
+
+        self.assertIn(
+            "FLINK_CHECKPOINT_DIR: s3://warehouse/flink-checkpoints/kafka-to-iceberg",
+            compose,
+        )
+        self.assertNotIn("FLINK_CHECKPOINT_DIR: file://", compose)
+        self.assertNotIn("flink-checkpoints-init", compose)
+        self.assertNotIn("flink_checkpoints", compose)
+        self.assertNotIn("/opt/flink/checkpoints", compose)
+
+    def test_flink_image_enables_s3_filesystem_plugin(self) -> None:
+        dockerfile = Path("docker/flink/Dockerfile").read_text(encoding="utf-8")
+
+        self.assertIn("flink-s3-fs-hadoop-*.jar", dockerfile)
+        self.assertIn("/opt/flink/lib/", dockerfile)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -12,8 +12,9 @@ RUN apt-get update \
     && mkdir -p /opt/flink/opt/python_lib \
     && python3 -m zipfile -e /opt/flink/opt/python/pyflink.zip /opt/flink/opt/python_lib \
     && python3 -c "import urllib.request; jars = {'hadoop-client-api-3.3.6.jar': 'https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-client-api/3.3.6/hadoop-client-api-3.3.6.jar', 'hadoop-client-runtime-3.3.6.jar': 'https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-client-runtime/3.3.6/hadoop-client-runtime-3.3.6.jar'}; [urllib.request.urlretrieve(url, '/opt/flink/lib/' + name) for name, url in jars.items()]" \
+    && cp /opt/flink/opt/flink-s3-fs-hadoop-*.jar /opt/flink/lib/ \
     && chmod +x /opt/flink/opt/python_lib/pyflink/bin/*.sh \
-    && chown -R flink:flink /opt/flink/opt/python_lib /opt/flink/lib/hadoop-client-*.jar
+    && chown -R flink:flink /opt/flink/opt/python_lib /opt/flink/lib/hadoop-client-*.jar /opt/flink/lib/flink-s3-fs-hadoop-*.jar
 
 ENV PYFLINK_CLIENT_EXECUTABLE=python3 \
     PYFLINK_PYTHON=python3 \

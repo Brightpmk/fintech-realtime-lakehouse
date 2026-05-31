@@ -64,18 +64,6 @@ services:
     networks:
       - fintech_network
 
-  flink-checkpoints-init:
-    image: alpine:3.20
-    container_name: fintech-flink-checkpoints-init
-    user: "0:0"
-    command: >
-      /bin/sh -c "mkdir -p /opt/flink/checkpoints/kafka-to-iceberg &&
-      chown -R 9999:9999 /opt/flink/checkpoints"
-    volumes:
-      - flink_checkpoints:/opt/flink/checkpoints
-    networks:
-      - fintech_network
-
   flink-jobmanager:
     build:
       context: .
@@ -87,8 +75,6 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
-      flink-checkpoints-init:
-        condition: service_completed_successfully
       minio-init:
         condition: service_completed_successfully
       iceberg-rest:
@@ -97,7 +83,7 @@ services:
       - "8082:8081"
     environment:
       <<: *aws-env
-      FLINK_CHECKPOINT_DIR: file:///opt/flink/checkpoints/kafka-to-iceberg
+      FLINK_CHECKPOINT_DIR: s3://warehouse/flink-checkpoints/kafka-to-iceberg
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       SCHEMA_REGISTRY_URL: http://schema-registry:8081
       ICEBERG_REST_URI: http://iceberg-rest:8181
@@ -118,7 +104,6 @@ services:
         s3.endpoint: http://minio:9000
         s3.path.style.access: true
     volumes:
-      - flink_checkpoints:/opt/flink/checkpoints
       - ../tmp/jars:/opt/flink/usrlib:ro
     networks:
       - fintech_network
@@ -136,7 +121,7 @@ services:
         condition: service_started
     environment:
       <<: *aws-env
-      FLINK_CHECKPOINT_DIR: file:///opt/flink/checkpoints/kafka-to-iceberg
+      FLINK_CHECKPOINT_DIR: s3://warehouse/flink-checkpoints/kafka-to-iceberg
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       SCHEMA_REGISTRY_URL: http://schema-registry:8081
       ICEBERG_REST_URI: http://iceberg-rest:8181
@@ -154,7 +139,6 @@ services:
         s3.endpoint: http://minio:9000
         s3.path.style.access: true
     volumes:
-      - flink_checkpoints:/opt/flink/checkpoints
       - ../tmp/jars:/opt/flink/usrlib:ro
     networks:
       - fintech_network
@@ -334,5 +318,4 @@ networks:
 volumes:
   kafka_data:
   minio_data:
-  flink_checkpoints:
   iceberg_catalog_db:
