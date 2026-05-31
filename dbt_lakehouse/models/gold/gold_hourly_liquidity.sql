@@ -77,7 +77,11 @@ hourly_aggregates as (
 )
 
 select
-    concat(date_format(hour_bucket, '%Y-%m-%d %H:%i:%s'), '|', currency) as hourly_liquidity_key,
+    concat(
+        cast(to_unixtime(cast(hour_bucket as timestamp(6) with time zone)) as varchar),
+        '|',
+        currency
+    ) as hourly_liquidity_key,
     hour_bucket,
     currency,
     transaction_count,

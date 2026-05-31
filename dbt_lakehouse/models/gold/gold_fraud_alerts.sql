@@ -127,7 +127,7 @@ deduped_alerts as (
     select 
         *,
         row_number() over (
-            partition by fraud_alert_key 
+            partition by transaction_id
             order by event_time desc
         ) as row_num
     from alerts
