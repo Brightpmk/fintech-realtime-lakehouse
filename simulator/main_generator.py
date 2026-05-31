@@ -133,7 +133,12 @@ class TransactionProducer:
         parse_schema(json.loads(schema_str))
         sr_client = SchemaRegistryClient({"url": self.config.schema_registry_url})
         if self.config.enforce_schema_registry_compatibility:
-            ensure_schema_registry_compatibility(sr_client, self.config.schema_registry_subject, self.config.schema_registry_compatibility, schema_str)
+            ensure_schema_registry_compatibility(
+                schema_registry_client=sr_client,
+                subject=self.config.schema_registry_subject,
+                compatibility=self.config.schema_registry_compatibility,
+                schema_str=schema_str,
+            )
         return AvroSerializer(sr_client, schema_str, conf={"auto.register.schemas": True})
 
     def produce(self, record: dict[str, Any]) -> bool:
