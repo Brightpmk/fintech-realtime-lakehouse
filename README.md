@@ -94,7 +94,7 @@ docker compose -f docker\docker-compose.yml ps
 
 #### Step 2: Initialize Trino & Iceberg tables
 ```powershell
-python storage\iceberg_init.py
+uv run python storage\iceberg_init.py
 ```
 
 #### Step 3: Copy Flink job files and config
@@ -119,7 +119,7 @@ docker exec `
 ```powershell
 $env:TARGET_EVENTS_PER_SECOND="20"
 $env:ANOMALY_RATE="0.15"
-python simulator\main_generator.py
+uv run python simulator\main_generator.py
 ```
 *(Let it generate traffic for 2–3 minutes, then hit `Ctrl+C` to stop)*
 
@@ -133,8 +133,8 @@ docker exec -it fintech-trino trino --execute "SELECT account_id, device_id FROM
 #### Step 7: Run dbt validation models for Gold layer
 ```powershell
 cd dbt_lakehouse
-dbt run --profiles-dir . --select gold
-dbt test --profiles-dir . --select gold
+uv run dbt run --profiles-dir . --select gold
+uv run dbt test --profiles-dir . --select gold
 cd ..
 ```
 
