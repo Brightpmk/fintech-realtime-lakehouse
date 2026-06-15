@@ -1,0 +1,16 @@
+[project]
+name = "fintech-realtime-lakehouse"
+version = "0.1.0"
+description = "A high-throughput, local sandbox for real-time Medallion Lakehouse architectures"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "confluent-kafka[avro]==2.8.2",
+    "fastavro==1.10.0",
+    "faker==33.3.1",
+    "dbt-core==1.11.11",
+    "dbt-trino==1.10.2",
+]
+
+[tool.uv]
+package = false

@@ -52,18 +52,22 @@ A high-throughput, local sandbox for real-time Medallion Lakehouse architectures
 
 ### Installation Steps
 
-1. **Clone the repository and set up a Python virtual environment:**
+1. **Clone the repository:**
    ```bash
    git clone <your-repo-url>
    cd fintech-realtime-lakehouse
-   python -m venv .venv
-   # Windows PowerShell:
-   .venv\Scripts\Activate.ps1
    ```
 
-2. **Install host dependencies (for simulator and init scripts):**
+2. **Sync the project virtual environment:**
+   This will automatically create a `.venv` virtual environment and install all pinned dependencies from `pyproject.toml` and `uv.lock`:
    ```bash
-   pip install -r requirements.txt
+   uv sync
+   ```
+
+3. **Activate the virtual environment:**
+   ```bash
+   # Windows PowerShell:
+   .venv\Scripts\Activate.ps1
    ```
 
 3. **Configure Environment Variables:**
